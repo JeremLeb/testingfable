@@ -360,3 +360,127 @@ def test_reproduction_disabled_bears_none():
     for _ in range(6):
         _, _, _, _, info = env.step(np.zeros(2))
     assert info["offspring"] == 0
+
+
+# ------------------------------------------------------------------ B6
+
+def _small_wm_and_post(cfg, steps=120):
+    """A tiny world model plus one posterior batch, for actor-critic tests."""
+    from embodied_agent.agent.replay import ReplayBuffer
+    from embodied_agent.model.world_model import WorldModel
+    env = make_env(cfg, seed=0)
+    buf = ReplayBuffer(100000)
+    rng = np.random.default_rng(0)
+    obs, _ = env.reset(seed=0)
+    buf.start_episode()
+    buf.add(obs, np.zeros(2), 0.0, 1.0)
+    a = np.zeros(2)
+    for _ in range(steps):
+        a = 0.8 * a + 0.2 * rng.uniform(-1, 1, 2)
+        obs, r, term, trunc, _ = env.step(a)
+        buf.add(obs, a, r, 0.0 if term else 1.0)
+        if term or trunc:
+            buf.end_episode(); obs, _ = env.reset()
+            buf.start_episode(); buf.add(obs, np.zeros(2), 0.0, 1.0)
+    buf.end_episode()
+    wm = WorldModel(cfg, env.sensors.spaces)
+    post, _ = wm.train_step(buf.sample(8, 16, rng))
+    return env, wm, post
+
+
+def test_efe_objective_default_is_return():
+    cfg = load_config("cpu_small")
+    assert cfg.agent.objective == "return"
+
+
+def test_efe_mode_logs_pragmatic_and_epistemic():
+    from embodied_agent.agent.actor_critic import ActorCritic
+    from embodied_agent.intrinsic import build_intrinsic
+    cfg = load_config("cpu_small")
+    cfg.agent.objective = "expected_free_energy"
+    cfg.intrinsic.method = "disagreement"
+    env, wm, post = _small_wm_and_post(cfg)
+    intr = build_intrinsic(cfg, wm.rssm.feat_dim, "cpu")
+    ac = ActorCritic(cfg, wm.rssm, wm, intrinsic=intr)
+    m = ac.train_step(post)
+    assert "efe_pragmatic" in m and "efe_epistemic" in m
+    # preferred outcome = homeostatic setpoints
+    assert ac._preferred_intero.tolist() == [1.0, cfg.env.temp_setpoint, 1.0]
+
+
+def test_return_mode_has_no_efe_terms():
+    from embodied_agent.agent.actor_critic import ActorCritic
+    cfg = load_config("cpu_small")  # default objective = return
+    env, wm, post = _small_wm_and_post(cfg)
+    ac = ActorCritic(cfg, wm.rssm, wm, intrinsic=None)
+    m = ac.train_step(post)
+    assert "efe_pragmatic" not in m
+
+
+def test_disagreement_epistemic_is_curiosity_scale_free():
+    import torch
+    from embodied_agent.intrinsic.disagreement import Disagreement
+    cfg = load_config("cpu_small")
+    cfg.intrinsic.method = "disagreement"
+    cfg.intrinsic.scale = 0.7
+    dis = Disagreement(cfg, feat_dim=32, device="cpu")
+    feat = torch.randn(64, 32)
+    dis.train_step(feat)                       # seeds the running-norm
+    r = dis.reward(feat)
+    e = dis.epistemic(feat)
+    # reward is the epistemic term times the hand-set curiosity scale
+    assert torch.allclose(r, cfg.intrinsic.scale * e, atol=1e-5)
+
+
+# ------------------------------------------------------------------ B7
+
+def _nonlinear_dataset(n, d_in=6, d_h=10, d_out=3, seed=0):
+    # one fixed target function (B, A); only the sampled inputs vary with seed,
+    # so train and test measure the same mapping.
+    fn = np.random.default_rng(1234)
+    B = fn.normal(0, 1, (d_h, d_in))
+    A = fn.normal(0, 1, (d_out, d_h))
+    X = np.random.default_rng(seed).normal(0, 1, (n, d_in))
+    Y = np.tanh(X @ B.T) @ A.T
+    return X.astype(float), (Y / (np.abs(Y).max() + 1e-6)).astype(float)
+
+
+def test_predictive_coding_learns_without_backprop():
+    from embodied_agent.model.predictive_coding import PredictiveCodingNet
+    Xtr, Ytr = _nonlinear_dataset(400, seed=0)
+    Xte, Yte = _nonlinear_dataset(200, seed=1)
+    pc = PredictiveCodingNet([6, 12, 3], seed=1)
+    mse0 = np.mean((pc.predict_batch(Xte) - Yte) ** 2)
+    rng = np.random.default_rng(0)
+    for _ in range(30):
+        idx = rng.permutation(len(Xtr))
+        pc.learn_epoch(Xtr[idx], Ytr[idx])
+    mse1 = np.mean((pc.predict_batch(Xte) - Yte) ** 2)
+    assert mse1 < 0.3 * mse0  # local rule genuinely learns the mapping
+
+
+def test_pc_local_update_aligns_with_backprop_gradient():
+    # Whittington & Bogacz: the local predictive-coding update approximates the
+    # backprop gradient. Check the output-layer update direction agrees.
+    from embodied_agent.model.predictive_coding import PredictiveCodingNet
+    pc = PredictiveCodingNet([6, 12, 3], seed=2, infer_steps=40, infer_lr=0.1)
+    X, Y = _nonlinear_dataset(1, seed=3)
+    x, y = X[0], Y[0]
+    # manual one-hidden-layer backprop gradient for the same weights
+    h = np.tanh(pc.W[0] @ x + pc.b[0])
+    out = pc.W[1] @ h + pc.b[1]
+    descent_dW1 = -np.outer(out - y, h)          # -dL/dW1
+    dW = pc.local_weight_update(x, y)
+    cos = (np.sum(dW[1] * descent_dW1)
+           / (np.linalg.norm(dW[1]) * np.linalg.norm(descent_dW1) + 1e-12))
+    assert cos > 0.9
+
+
+def test_world_model_rejects_nonbackprop_rule():
+    import pytest
+    from embodied_agent.model.world_model import WorldModel
+    cfg = load_config("cpu_small")
+    cfg.model.learning_rule = "predictive_coding"
+    env = make_env(cfg, seed=0)
+    with pytest.raises(ValueError):
+        WorldModel(cfg, env.sensors.spaces)

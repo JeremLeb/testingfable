@@ -46,6 +46,15 @@ class Disagreement:
         dis = self._disagreement(flat)
         return (self.scale * dis / self.norm.std).reshape(shape)
 
+    @torch.no_grad()
+    def epistemic(self, feat: torch.Tensor) -> torch.Tensor:
+        """Whitened ensemble disagreement WITHOUT the hand-set curiosity scale
+        -- the information-gain (epistemic) term for the EFE objective (B6)."""
+        shape = feat.shape[:-1]
+        flat = feat.reshape(-1, feat.shape[-1])
+        dis = self._disagreement(flat)
+        return (dis / self.norm.std).reshape(shape)
+
     def train_step(self, feat: torch.Tensor) -> dict:
         with torch.no_grad():
             tgt = self.target(feat)

@@ -261,6 +261,52 @@ phenotype → fitness → selection machinery lives in `evolution/` (`Genome`,
 `Population`); `train.live_one_life()` provides the full-life fitness that also
 runs lifetime learning.
 
+### Phase 3 — the learning theory (B6, B7), research-grade
+
+The last two modules address *how* learning happens, not just what it pursues.
+Both are config switches measured against the current system; both are honest
+about scale.
+
+**B6 — active inference (`agent.objective: expected_free_energy`).** Instead of
+maximizing λ-returns of a reward head plus a separately-scaled curiosity bonus,
+the actor minimizes **expected free energy** — a single quantity uniting a
+*pragmatic* term (log-preference of the predicted interoceptive outcome under a
+prior centred on the homeostatic setpoints) and an *epistemic* term (ensemble
+disagreement = expected information gain), both in natural units.
+
+```bash
+python -m embodied_agent.scripts.active_inference_demo --config cpu_small
+```
+
+![active inference](docs/assets/active_inference_demo.png)
+
+Food-seeking emerges from *preferences alone* — matching (here exceeding) the
+reward-based baseline with **no reward head and no tuned curiosity weight**
+(left) — and the one objective genuinely decomposes into two drives, the
+epistemic term largest early (explore the unknown world) then receding as the
+pragmatic term (drive toward setpoints) carries on (right). These `cpu_small`
+numbers are single-seed and noisy; the ensemble epistemic term is
+Plan2Explore-style and expected to be more reliable at scale.
+
+**B7 — local learning (`model.learning_rule: predictive_coding`).** The deepest
+gap: cortex does not run BPTT over a global loss. **Predictive coding**
+(`model/predictive_coding.py`) uses per-layer error neurons, inference by local
+error minimization, and a purely **local Hebbian** weight update (post-synaptic
+error × pre-synaptic activity) — no backward pass. Whittington & Bogacz showed
+this approximates the backprop gradient.
+
+```bash
+python -m embodied_agent.scripts.predictive_coding_demo --config cpu_small
+```
+
+![predictive coding](docs/assets/predictive_coding_demo.png)
+
+On the project's own substrate — open-loop next-observation prediction — the
+local rule tracks backprop's test MSE essentially on top of it, and a unit test
+confirms its weight update points the same way as the backprop gradient
+(cosine > 0.99). The recurrent world model itself remains BPTT (it rejects the
+switch loudly); a full predictive-coding RSSM is the natural extension.
+
 ## Arbitration (which drive is winning)
 
 Reward is an explicit weighted sum of energy, thermal, and integrity drive

@@ -103,6 +103,14 @@ class ActorCritic:
         self.rssm = rssm
         self.wm = world_model
         self.intrinsic = intrinsic
+        # B6 active inference: preferred interoceptive outcome C = setpoints
+        # (energy full, temp at setpoint, integrity full). The pragmatic term
+        # of EFE is the log-preference of predicted intero under this prior.
+        self.objective = cfg.agent.objective
+        self._preferred_intero = torch.tensor(
+            [1.0, cfg.env.temp_setpoint, 1.0], dtype=torch.float32)
+        # epistemic (information-gain) term reuses a disagreement ensemble
+        self._epistemic = intrinsic if hasattr(intrinsic, "epistemic") else None
         feat = rssm.feat_dim
         self.actor = Actor(feat, action_dim, cfg.model.hidden,
                            action_bias=cfg.agent.action_bias)
@@ -123,6 +131,28 @@ class ActorCritic:
                          self.critic.parameters()):
             tp.data.mul_(tau).add_(p.data, alpha=1 - tau)
 
+    def _efe_value(self, feats: torch.Tensor):
+        """Expected-free-energy value per imagined state (B6): pragmatic +
+        epistemic, both in natural (log-probability / information) units, so
+        they combine without a separately tuned curiosity weight.
+
+        Pragmatic = log-preference of the predicted interoceptive outcome under
+        a Gaussian prior centred on the homeostatic setpoints (reach preferred
+        body states). Epistemic = whitened ensemble disagreement (expected
+        information gain -- seek states the model is uncertain about)."""
+        C = self._preferred_intero.to(feats.device)
+        pred_intero = self.wm.decoder(feats)["intero"]         # (N, H, 3)
+        pragmatic = -0.5 * self.ac.efe_precision \
+            * ((pred_intero - C) ** 2).sum(-1)                 # (N, H)
+        value = pragmatic
+        epistemic = torch.zeros_like(pragmatic)
+        if self._epistemic is not None:
+            epistemic = self._epistemic.epistemic(feats.detach())
+            value = value + self.ac.efe_epistemic * epistemic
+        terms = {"efe_pragmatic": float(pragmatic.mean().detach()),
+                 "efe_epistemic": float(epistemic.mean().detach())}
+        return value, terms
+
     def train_step(self, post: RSSMState, horizon: int | None = None) -> dict:
         """One imagination-based actor-critic update from real posterior
         states `post` (shape (B, T, ...)); these are used only as start
@@ -139,10 +169,16 @@ class ActorCritic:
         # prepend the start state so we have states 0..H
         feats = torch.cat([start.feat()[:, None], states.feat()], dim=1)
 
-        reward = self.wm.predict_reward(feats[:, 1:])          # (N, H)
         cont = self.wm.predict_cont(feats[:, 1:])              # (N, H)
-        if self.intrinsic is not None:
-            reward = reward + self.intrinsic.reward(feats[:, 1:].detach())
+        if self.objective == "expected_free_energy":
+            # EFE = pragmatic (reach preferred interoceptive outcomes) +
+            # epistemic (information gain). One quantity, no tuned curiosity mix.
+            reward, efe_terms = self._efe_value(feats[:, 1:])
+        else:
+            reward = self.wm.predict_reward(feats[:, 1:])      # (N, H)
+            if self.intrinsic is not None:
+                reward = reward + self.intrinsic.reward(feats[:, 1:].detach())
+            efe_terms = {}
 
         entropy = torch.stack([e["entropy"] for e in extras], dim=1)  # (N, H)
 
@@ -193,4 +229,5 @@ class ActorCritic:
             "actor_grad": float(actor_grad),
             "critic_grad": float(critic_grad),
             "return_scale": self._ret_scale,
+            **efe_terms,
         }

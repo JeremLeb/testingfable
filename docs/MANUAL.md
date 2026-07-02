@@ -212,7 +212,23 @@ python -m embodied_agent.scripts.development_demo --config cpu_small     # B3
 python -m embodied_agent.scripts.metabolism_demo --config cpu_small      # B4
 python -m embodied_agent.train --config cpu_bio                          # Phase 1 on
 python -m embodied_agent.scripts.evolution_demo --config cpu_small       # B5 (Phase 2)
+python -m embodied_agent.scripts.active_inference_demo --config cpu_small # B6 (Phase 3)
+python -m embodied_agent.scripts.predictive_coding_demo --config cpu_small # B7 (Phase 3)
 ```
+
+**B6 active inference** is `agent.objective` = `return` (baseline: λ-returns of
+reward + curiosity) or `expected_free_energy` (minimize EFE = pragmatic
+log-preference over predicted intero setpoints + epistemic ensemble
+disagreement); tune with `agent.efe_precision` and `agent.efe_epistemic`. EFE
+mode needs `intrinsic.method: disagreement` for the epistemic term and logs
+`efe_pragmatic` / `efe_epistemic`.
+
+**B7 predictive coding** is `model.learning_rule` = `backprop` (default) or
+`predictive_coding` (local error-neuron / Hebbian rule,
+`model/predictive_coding.py`, with `pc_inference_steps`, `pc_inference_lr`,
+`pc_weight_lr`). The recurrent `WorldModel` is BPTT and rejects the switch; the
+predictive-coding rule applies to the feedforward prediction substrate (its
+demo shows open-loop MSE parity with backprop).
 
 ### 4.10 Tests
 
@@ -229,9 +245,11 @@ discrete straight-through latents, the CNN retina path, AUC + latent probe),
 the biological modules (`tests/test_bio.py`: allostatic weighting,
 prioritized-replay ordering, wake/sleep phase, plasticity annealing, continual
 life across truncation, bounded planning, sensorimotor delay, sparse latent,
-and the B5 genome/mutation/crossover, action-bias instinct, fitness adaptation
-in a harsh arena, and the reproduction drive), and end-to-end training smoke
-tests (incl. the pixel retina).
+the B5 genome/mutation/crossover, action-bias instinct, fitness adaptation
+in a harsh arena, and the reproduction drive; the B6 EFE decomposition and
+scale-free epistemic term; and the B7 predictive-coding learning and its
+gradient-alignment with backprop), and end-to-end training smoke tests (incl.
+the pixel retina).
 
 ## 5. Configuration reference
 

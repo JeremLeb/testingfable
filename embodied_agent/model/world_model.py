@@ -29,6 +29,17 @@ class WorldModel(nn.Module):
         super().__init__()
         self.cfg = cfg
         mc = cfg.model
+        # B7: the recurrent world model is trained by backprop-through-time.
+        # Predictive coding is a *local* rule provided for the feedforward
+        # prediction substrate (model/predictive_coding.py + its demo); the full
+        # PC-RSSM is the natural extension. Fail loudly rather than silently
+        # ignoring the switch here.
+        if mc.learning_rule != "backprop":
+            raise ValueError(
+                f"WorldModel supports learning_rule='backprop'; got "
+                f"'{mc.learning_rule}'. Predictive coding is available via "
+                f"model.predictive_coding.PredictiveCodingNet and the "
+                f"predictive_coding_demo (open-loop prediction substrate).")
         self.obs_spaces = obs_spaces
         self.recon_scales = mc.recon_scales
 

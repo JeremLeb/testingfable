@@ -102,6 +102,13 @@ class ModelConfig:
     # (k-winners-take-all over the discrete groups). Off -> dense (baseline).
     sparse_latent: bool = False
     sparse_frac: float = 0.5      # fraction of groups allowed to fire
+    # B7 learning rule for the predictive substrate. "backprop" is the default
+    # (BPTT + global loss); "predictive_coding" uses local error-neuron /
+    # Hebbian updates (no autograd through the loss). See model/predictive_coding.
+    learning_rule: str = "backprop"
+    pc_inference_steps: int = 20  # relaxation iterations per predictive-coding step
+    pc_inference_lr: float = 0.1  # step size of the latent relaxation
+    pc_weight_lr: float = 0.02    # local Hebbian weight-update rate
     recon_scales: dict = field(default_factory=lambda: {
         "vision": 1.0, "retina": 1.0, "touch": 1.0, "proprio": 1.0,
         "intero": 10.0, "smell": 1.0,
@@ -122,6 +129,13 @@ class AgentConfig:
     # B5 innate action bias (a heritable behavioural prior): added to the
     # actor's pre-tanh mean, so a newborn acts on instinct before it learns.
     action_bias: list = field(default_factory=lambda: [0.0, 0.0])
+    # B6 active inference. "return" -> maximize lambda-returns of reward (+ a
+    # hand-scaled curiosity bonus); "expected_free_energy" -> minimize EFE, a
+    # single quantity uniting preference-seeking (pragmatic) and information
+    # gain (epistemic) with no separately tuned curiosity weight.
+    objective: str = "return"
+    efe_precision: float = 5.0    # precision of the preferred-outcome prior C
+    efe_epistemic: float = 1.0    # weight on the epistemic term (1 = pure EFE)
 
 
 @dataclass

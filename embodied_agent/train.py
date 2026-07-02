@@ -21,6 +21,7 @@ from .agent.actor_critic import ActorCritic
 from .agent.agent import DreamerAgent
 from .agent.collect import collect_random
 from .agent.replay import ReplayBuffer
+from .agent.sleep import SleepController
 from .config import load_config
 from .env import make_env
 from .env.neuromod import Neuromodulators
@@ -154,6 +155,43 @@ def run(cfg, verbose: bool = True) -> dict:
     neuromod = Neuromodulators(cfg.neuromod)
     base_wm_lr, base_actor_lr = cfg.model.lr, cfg.agent.actor_lr
 
+    # B2: circadian wake/sleep consolidation (None -> baseline interleaved
+    # uniform-replay updates, unchanged).
+    sleep_ctl = SleepController(cfg.sleep) if cfg.sleep.enabled else None
+
+    def gradient_update(prioritized: bool = False, dream: bool = False):
+        """One consolidation step: world-model + actor-critic update on a
+        replayed sequence, with neuromodulatory LR gating (B1). During sleep,
+        `prioritized` draws salient memories and `dream` adds extra imagination
+        passes (self-generated behavioural training)."""
+        batch = buffer.sample(cfg.train.batch_size, cfg.train.seq_len, rng,
+                              sleep_cfg=cfg.sleep if prioritized else None)
+        post, wm_metrics = wm.train_step(batch)
+        ac_metrics = ac.train_step(post)
+        if dream:
+            for _ in range(cfg.sleep.dream_updates):
+                ac.train_step(post)
+        if intrinsic is not None:
+            intr_metrics = intrinsic.train_step(
+                post.feat().reshape(-1, wm.rssm.feat_dim).detach())
+            logger.add(**intr_metrics)
+        # B1: surprise (prediction error) -> NE plasticity gain on the
+        # world-model LR; |TD error| -> dopamine tone on the actor LR.
+        ne_gain = neuromod.update_surprise(wm_metrics["recon"] + wm_metrics["kl"])
+        neuromod.update_rpe(ac_metrics["critic_loss"] ** 0.5)
+        for g in wm.opt.param_groups:
+            g["lr"] = base_wm_lr * ne_gain
+        for g in ac.actor_opt.param_groups:
+            g["lr"] = base_actor_lr * neuromod.actor_lr_gain()
+        logger.add(**wm_metrics, **ac_metrics, **neuromod.metrics())
+        return wm_metrics
+
+    @torch.no_grad()
+    def probe_loss(batch) -> float:
+        return float(wm.loss(batch)[0].detach())
+
+    night: dict = {}  # holds a fixed probe batch + pre-sleep error per night
+
     log = print if verbose else (lambda *a, **k: None)
     log(f"device={device} | wm params "
         f"{sum(p.numel() for p in wm.parameters())/1e3:.0f}k | "
@@ -175,8 +213,13 @@ def run(cfg, verbose: bool = True) -> dict:
     t0 = time.time()
 
     for step in range(1, cfg.train.total_steps + 1):
-        action = agent.act(obs, env=env, noise=cfg.agent.expl_noise)
-        interventions += int(agent.last_intervened)
+        awake = sleep_ctl is None or sleep_ctl.is_awake(step)
+        if awake:
+            action = agent.act(obs, env=env, noise=cfg.agent.expl_noise)
+            interventions += int(agent.last_intervened)
+        else:
+            action = np.zeros(2, dtype=np.float32)  # asleep: rest, don't forage
+            agent.last_intervened = False
         obs, reward, term, trunc, info = env.step(action)
         buffer.add(obs, action, reward, 0.0 if term else 1.0)
         ep_reward += reward
@@ -190,6 +233,8 @@ def run(cfg, verbose: bool = True) -> dict:
                   "weight_energy", "weight_thermal", "weight_integrity"):
             if k in info:
                 logger.add(**{k: info[k]})
+        if sleep_ctl is not None:
+            logger.add(**sleep_ctl.metrics(step))
 
         if term or trunc:
             logger.add(ep_reward=ep_reward, ep_len=ep_len,
@@ -201,27 +246,33 @@ def run(cfg, verbose: bool = True) -> dict:
             buffer.add(obs, np.zeros(2), 0.0, 1.0)
             ep_reward, ep_len, interventions = 0.0, 0, 0
 
-        if step % cfg.train.train_every == 0 and \
-                buffer.can_sample(cfg.train.seq_len):
-            for _ in range(cfg.train.updates_per_train):
-                batch = buffer.sample(cfg.train.batch_size,
-                                      cfg.train.seq_len, rng)
-                post, wm_metrics = wm.train_step(batch)
-                ac_metrics = ac.train_step(post)
-                if intrinsic is not None:
-                    intr_metrics = intrinsic.train_step(
-                        post.feat().reshape(-1, wm.rssm.feat_dim).detach())
-                    logger.add(**intr_metrics)
-                # B1: surprise (prediction error) -> NE plasticity gain on the
-                # world-model LR; |TD error| -> dopamine tone on the actor LR.
-                ne_gain = neuromod.update_surprise(
-                    wm_metrics["recon"] + wm_metrics["kl"])
-                neuromod.update_rpe(ac_metrics["critic_loss"] ** 0.5)
-                for g in wm.opt.param_groups:
-                    g["lr"] = base_wm_lr * ne_gain
-                for g in ac.actor_opt.param_groups:
-                    g["lr"] = base_actor_lr * neuromod.actor_lr_gain()
-                logger.add(**wm_metrics, **ac_metrics, **neuromod.metrics())
+        can_train = buffer.can_sample(cfg.train.seq_len)
+        if sleep_ctl is None:
+            # baseline: interleaved uniform-replay updates every train_every.
+            if step % cfg.train.train_every == 0 and can_train:
+                for _ in range(cfg.train.updates_per_train):
+                    gradient_update()
+        elif awake:
+            # wake: only light, uniform fast adaptation.
+            if step % cfg.train.train_every == 0 and can_train:
+                for _ in range(cfg.sleep.wake_updates):
+                    gradient_update()
+        else:
+            # sleep: consolidate the day's experience -- prioritized ("emotional")
+            # replay of salient memories, plus dreaming. A fixed probe batch
+            # sampled at dusk tracks the per-night consolidation curve.
+            if sleep_ctl.just_fell_asleep(step) and can_train:
+                night["batch"] = buffer.sample(cfg.train.batch_size,
+                                               cfg.train.seq_len, rng)
+                night["pre"] = probe_loss(night["batch"])
+            if can_train:
+                for _ in range(sleep_ctl.updates_per_sleep_step):
+                    gradient_update(prioritized=cfg.sleep.prioritized,
+                                    dream=cfg.sleep.dream)
+                if "batch" in night:
+                    cur = probe_loss(night["batch"])
+                    logger.add(sleep_probe_loss=cur,
+                               sleep_consolidation=night["pre"] - cur)
 
         if step % cfg.train.log_every == 0:
             row = logger.flush(step)

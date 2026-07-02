@@ -173,6 +173,32 @@ class NeuromodConfig:
 
 
 @dataclass
+class SleepConfig:
+    # B2 -- sleep, consolidation & dreaming. Off by default so the baseline
+    # (interleaved uniform-replay updates, no circadian structure) is preserved.
+    enabled: bool = False
+    # circadian clock: one day = day_steps env steps; the last (1 - wake_frac)
+    # of each day is sleep. Phase is exposed as an interoceptive-style signal.
+    day_steps: int = 1000
+    wake_frac: float = 0.8         # fraction of a day spent awake and foraging
+    # while awake the agent does only *light* fast adaptation; the bulk of
+    # world-model consolidation is deferred to sleep (complementary systems).
+    wake_updates: int = 1          # updates per train_every during wake
+    sleep_updates: int = 40        # consolidation updates per sleep phase
+    # prioritized ("emotional") replay: salient episodes -- big |reward| spikes
+    # (feeding, collisions, death) -- are replayed preferentially during sleep.
+    prioritized: bool = True
+    priority_exponent: float = 0.8  # alpha: 0 -> uniform, 1 -> full priority
+    priority_eps: float = 0.02
+    reward_salience: float = 1.0    # weight of peak |reward| in episode salience
+    surprise_salience: float = 1.0  # weight of reward variability (eventfulness)
+    # dreaming: extra actor-critic imagination updates from salient sleep
+    # batches -- self-generated behavioural training on recombined experience.
+    dream: bool = True
+    dream_updates: int = 2         # extra AC imagination passes per sleep batch
+
+
+@dataclass
 class TrainConfig:
     total_steps: int = 30000
     warmup_steps: int = 1500      # random-policy steps before training starts
@@ -200,6 +226,7 @@ class Config:
     shield: ShieldConfig = field(default_factory=ShieldConfig)
     reward: RewardConfig = field(default_factory=RewardConfig)
     neuromod: NeuromodConfig = field(default_factory=NeuromodConfig)
+    sleep: SleepConfig = field(default_factory=SleepConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
 
 

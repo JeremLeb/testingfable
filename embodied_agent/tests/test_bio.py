@@ -1,6 +1,8 @@
 """Tests for the biological-plausibility modules (Phase 1)."""
 import numpy as np
 
+from embodied_agent.agent.replay import ReplayBuffer
+from embodied_agent.agent.sleep import SleepController
 from embodied_agent.config import load_config
 from embodied_agent.env import make_env
 from embodied_agent.env.neuromod import Neuromodulators, allostatic_weights
@@ -65,3 +67,67 @@ def test_reward_logs_instantaneous_weights_when_enabled():
     _, _, _, _, info = env.step(np.array([0.5, 0.0]))
     assert "weight_energy" in info and "weight_integrity" in info
     assert info["weight_energy"] > 0
+
+
+# ------------------------------------------------------------------ B2
+
+def _buffer_with_saliences(saliences, length=30):
+    """A buffer with one episode per requested peak-|reward| salience."""
+    buf = ReplayBuffer(capacity=100000)
+    obs_dim = 4
+    for s in saliences:
+        buf.start_episode()
+        for t in range(length):
+            obs = {"proprio": np.zeros(obs_dim, dtype=np.float32)}
+            r = s if t == length // 2 else 0.0  # a single reward spike
+            buf.add(obs, np.zeros(2), r, 1.0)
+        buf.end_episode()
+    return buf
+
+
+def test_prioritized_replay_favors_salient_episodes():
+    cfg = load_config("cpu_small")
+    cfg.sleep.enabled = True
+    buf = _buffer_with_saliences([0.0, 0.0, 0.0, 5.0])  # one salient memory
+    sal, prob = buf.episode_priorities(seq_len=10, sleep_cfg=cfg.sleep)
+    salient = int(np.argmax(sal))
+    assert prob[salient] == prob.max()
+    assert prob[salient] > 1.0 / len(prob)  # above uniform
+
+
+def test_uniform_replay_is_flat():
+    buf = _buffer_with_saliences([0.0, 1.0, 5.0])
+    _, prob = buf.episode_priorities(seq_len=10, sleep_cfg=None)
+    assert np.allclose(prob, prob[0])
+
+
+def test_prioritized_sampling_draws_salient_more_often():
+    cfg = load_config("cpu_small")
+    cfg.sleep.enabled = True
+    buf = _buffer_with_saliences([0.0, 0.0, 0.0, 0.0, 8.0])
+    rng = np.random.default_rng(0)
+    hits = 0
+    for _ in range(200):
+        batch = buf.sample(4, 10, rng, sleep_cfg=cfg.sleep)
+        hits += int(batch["reward"].abs().max() > 4.0)
+    # the lone salient episode is 1/5 of memory but drawn far more than 20%
+    assert hits > 80
+
+
+def test_sleep_controller_wake_sleep_phase():
+    cfg = load_config("cpu_small")
+    cfg.sleep.day_steps = 100
+    cfg.sleep.wake_frac = 0.8
+    ctl = SleepController(cfg.sleep)
+    assert ctl.is_awake(1) and ctl.is_awake(79)
+    assert not ctl.is_awake(80) and not ctl.is_awake(99)
+    assert ctl.just_fell_asleep(80)
+    assert ctl.just_woke(100)  # next dawn
+    assert 0.0 <= ctl.phase(50) < 1.0
+
+
+def test_sleep_disabled_leaves_baseline_sampling_uniform():
+    # with no SleepConfig passed, sampling ignores salience entirely
+    buf = _buffer_with_saliences([0.0, 9.0])
+    _, prob = buf.episode_priorities(seq_len=10, sleep_cfg=None)
+    assert np.allclose(prob, 0.5)

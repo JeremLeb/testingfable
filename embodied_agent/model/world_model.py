@@ -38,7 +38,8 @@ class WorldModel(nn.Module):
             action_dim, mc.embed_dim, mc.deter_dim, mc.hidden,
             latent_kind=mc.latent_kind, stoch_dim=mc.stoch_dim,
             groups=mc.latent_groups, classes=mc.latent_classes,
-            unimix=mc.unimix)
+            unimix=mc.unimix, sparse_latent=mc.sparse_latent,
+            sparse_frac=mc.sparse_frac)
         feat = self.rssm.feat_dim
         self.decoder = MultiDecoder(obs_spaces, feat, mc.hidden, mc.cnn_depth)
 

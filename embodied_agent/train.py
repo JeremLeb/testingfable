@@ -21,6 +21,7 @@ from .agent.actor_critic import ActorCritic
 from .agent.agent import DreamerAgent
 from .agent.collect import collect_random
 from .agent.development import Development
+from .agent.metabolism import Metabolism, Sensorimotor
 from .agent.replay import ReplayBuffer
 from .agent.sleep import SleepController
 from .config import load_config
@@ -36,16 +37,23 @@ from .utils.seeding import seed_everything
 def evaluate(agent, cfg, seed, episodes=3, deterministic=True):
     """Run the current policy and return mean episode reward + diagnostics."""
     env = make_env(cfg, seed=seed + 777)
+    # B4: sensorimotor latency/noise is part of the world, so evaluation faces
+    # it too (this is what makes the robustness measurement meaningful).
+    smr = Sensorimotor(cfg.metab, seed=seed) if cfg.metab.enabled else None
     totals, lengths, eaten, coverage = [], [], [], []
     for ep in range(episodes):
         obs, _ = env.reset(seed=seed + 777 + ep)
         agent.reset_state()
+        if smr is not None:
+            smr.reset(obs)
         total, steps, food = 0.0, 0, 0
         visited = set()
         cell = cfg.env.arena_size / 12
         while True:
-            action = agent.act(obs, env=env, deterministic=deterministic)
-            obs, reward, term, trunc, info = env.step(action)
+            percept = smr.perceive(obs) if smr is not None else obs
+            action = agent.act(percept, env=env, deterministic=deterministic)
+            motor = smr.execute(action) if smr is not None else action
+            obs, reward, term, trunc, info = env.step(motor)
             total += reward
             steps += 1
             food += info["food_eaten"]
@@ -166,6 +174,12 @@ def run(cfg, verbose: bool = True) -> dict:
     continual = development is not None and cfg.dev.continual
     life = {"age": 0, "births": 0}
 
+    # B4: metabolic cost of cognition + energy-gated planning, and sensorimotor
+    # latency/noise (both None/no-op unless metab.enabled).
+    metabolism = Metabolism(cfg.metab) if cfg.metab.enabled else None
+    smr = Sensorimotor(cfg.metab, seed=seed) if cfg.metab.enabled else None
+    body = {"energy": 1.0}  # most recent body energy, gates planning depth
+
     def gradient_update(prioritized: bool = False, dream: bool = False):
         """One consolidation step: world-model + actor-critic update on a
         replayed sequence, with neuromodulatory LR gating (B1). During sleep,
@@ -174,10 +188,19 @@ def run(cfg, verbose: bool = True) -> dict:
         batch = buffer.sample(cfg.train.batch_size, cfg.train.seq_len, rng,
                               sleep_cfg=cfg.sleep if prioritized else None)
         post, wm_metrics = wm.train_step(batch)
-        ac_metrics = ac.train_step(post)
+        # B4: energy-gated planning depth (bounded planning) + metabolic cost.
+        H = metabolism.planning_horizon(body["energy"], cfg.agent.horizon) \
+            if metabolism else cfg.agent.horizon
+        ac_metrics = ac.train_step(post, horizon=H)
+        passes = 1
         if dream:
             for _ in range(cfg.sleep.dream_updates):
-                ac.train_step(post)
+                ac.train_step(post, horizon=H)
+                passes += 1
+        if metabolism is not None:
+            imagined = H * cfg.train.batch_size * cfg.train.seq_len * passes
+            env.homeostasis.spend_energy(metabolism.cognition_cost(imagined))
+            logger.add(plan_horizon=H)
         if intrinsic is not None:
             intr_metrics = intrinsic.train_step(
                 post.feat().reshape(-1, wm.rssm.feat_dim).detach())
@@ -219,6 +242,8 @@ def run(cfg, verbose: bool = True) -> dict:
 
     obs, _ = env.reset(seed=seed)
     agent.reset_state()
+    if smr is not None:
+        smr.reset(obs)
     buffer.start_episode()
     buffer.add(obs, np.zeros(2), 0.0, 1.0)
     ep_reward, ep_len, interventions = 0.0, 0, 0
@@ -226,14 +251,19 @@ def run(cfg, verbose: bool = True) -> dict:
 
     for step in range(1, cfg.train.total_steps + 1):
         awake = sleep_ctl is None or sleep_ctl.is_awake(step)
+        # B4: the agent acts on a (possibly delayed) perception, and the world
+        # receives a (possibly delayed, noisy) action.
+        percept = smr.perceive(obs) if smr is not None else obs
         if awake:
-            action = agent.act(obs, env=env, noise=cfg.agent.expl_noise)
+            action = agent.act(percept, env=env, noise=cfg.agent.expl_noise)
             interventions += int(agent.last_intervened)
         else:
             action = np.zeros(2, dtype=np.float32)  # asleep: rest, don't forage
             agent.last_intervened = False
-        obs, reward, term, trunc, info = env.step(action)
-        buffer.add(obs, action, reward, 0.0 if term else 1.0)
+        motor = smr.execute(action) if smr is not None else action
+        obs, reward, term, trunc, info = env.step(motor)
+        buffer.add(obs, motor, reward, 0.0 if term else 1.0)
+        body["energy"] = info["energy"]
         ep_reward += reward
         ep_len += 1
         life["age"] += 1
@@ -271,6 +301,8 @@ def run(cfg, verbose: bool = True) -> dict:
             buffer.end_episode()
             obs, _ = env.reset()
             agent.reset_state()
+            if smr is not None:
+                smr.reset(obs)
             buffer.start_episode()
             buffer.add(obs, np.zeros(2), 0.0, 1.0)
             ep_reward, ep_len, interventions = 0.0, 0, 0

@@ -116,20 +116,21 @@ class ActorCritic:
                          self.critic.parameters()):
             tp.data.mul_(tau).add_(p.data, alpha=1 - tau)
 
-    def train_step(self, post: RSSMState) -> dict:
+    def train_step(self, post: RSSMState, horizon: int | None = None) -> dict:
         """One imagination-based actor-critic update from real posterior
         states `post` (shape (B, T, ...)); these are used only as start
-        states and are detached from the world-model graph."""
+        states and are detached from the world-model graph. `horizon` overrides
+        the imagination depth (B4 bounded planning)."""
+        H = self.ac.horizon if horizon is None else max(1, int(horizon))
         # flatten (B, T) real states into a batch of imagination starts
         B, T = post.h.shape[:2]
         start = RSSMState(post.h.reshape(B * T, -1).detach(),
                           post.z.reshape(B * T, -1).detach())
 
         states, actions, extras = self.rssm.imagine(
-            self.actor, start, self.ac.horizon)
+            self.actor, start, H)
         # prepend the start state so we have states 0..H
         feats = torch.cat([start.feat()[:, None], states.feat()], dim=1)
-        H = self.ac.horizon
 
         reward = self.wm.predict_reward(feats[:, 1:])          # (N, H)
         cont = self.wm.predict_cont(feats[:, 1:])              # (N, H)

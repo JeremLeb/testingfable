@@ -20,6 +20,8 @@ The stochastic latent is pluggable via `latent_kind`:
 """
 from __future__ import annotations
 
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -50,12 +52,17 @@ class RSSM(nn.Module):
     def __init__(self, action_dim: int, embed_dim: int, deter_dim: int,
                  hidden: int, latent_kind: str = "discrete",
                  stoch_dim: int = 32, groups: int = 16, classes: int = 16,
-                 unimix: float = 0.01, min_std: float = 0.1):
+                 unimix: float = 0.01, min_std: float = 0.1,
+                 sparse_latent: bool = False, sparse_frac: float = 0.5):
         super().__init__()
         self.latent_kind = latent_kind
         self.deter_dim = deter_dim
         self.groups, self.classes = groups, classes
         self.unimix, self.min_std = unimix, min_std
+        # B4 sparse cortical code: keep only k = ceil(frac * groups) of the
+        # discrete groups active (k-winners-take-all), zeroing the rest.
+        self.sparse_latent = sparse_latent and latent_kind == "discrete"
+        self.k_active = max(1, int(math.ceil(sparse_frac * groups)))
 
         if latent_kind == "discrete":
             self.stoch_flat = groups * classes
@@ -85,7 +92,15 @@ class RSSM(nn.Module):
         """Map a network output to (sampled z, distribution params)."""
         if self.latent_kind == "discrete":
             logits = raw.reshape(*raw.shape[:-1], self.groups, self.classes)
-            z = categorical_sample(logits, self.unimix)
+            z = categorical_sample(logits, self.unimix)   # (..., G*C) flat
+            if self.sparse_latent and self.k_active < self.groups:
+                # k-winners over groups: keep the k most confident (peakiest)
+                # groups, zero the rest -> a sparse assembly code.
+                zc = z.reshape(*z.shape[:-1], self.groups, self.classes)
+                conf = torch.softmax(logits, dim=-1).amax(dim=-1)   # (..., G)
+                topk = conf.topk(self.k_active, dim=-1).indices
+                mask = torch.zeros_like(conf).scatter_(-1, topk, 1.0)
+                z = (zc * mask.unsqueeze(-1)).reshape(*z.shape)
             return z, {"logits": raw}
         mean, std = torch.chunk(raw, 2, dim=-1)
         std = F.softplus(std) + self.min_std

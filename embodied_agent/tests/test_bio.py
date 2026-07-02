@@ -2,6 +2,7 @@
 import numpy as np
 
 from embodied_agent.agent.development import Development
+from embodied_agent.agent.metabolism import Metabolism, Sensorimotor
 from embodied_agent.agent.replay import ReplayBuffer
 from embodied_agent.agent.sleep import SleepController
 from embodied_agent.config import load_config
@@ -175,3 +176,95 @@ def test_continual_life_survives_truncation(tmp_path):
     rows = list(csv.DictReader(open(tmp_path / "life" / "metrics.csv")))
     ages = [float(r["age"]) for r in rows if r.get("age")]
     assert max(ages) > cfg.env.max_episode_steps
+
+
+# ------------------------------------------------------------------ B4
+
+def test_bounded_planning_scales_horizon_with_energy():
+    cfg = load_config("cpu_small")
+    cfg.metab.enabled = True
+    cfg.metab.min_horizon = 3
+    m = Metabolism(cfg.metab)
+    base = cfg.agent.horizon
+    assert m.planning_horizon(1.0, base) == base            # satiated -> full
+    assert m.planning_horizon(0.0, base) == cfg.metab.min_horizon
+    assert m.planning_horizon(1.0, base) > m.planning_horizon(0.4, base) \
+        >= m.planning_horizon(0.0, base)
+
+
+def test_metabolism_disabled_is_free_and_full():
+    cfg = load_config("cpu_small")
+    cfg.metab.enabled = False
+    m = Metabolism(cfg.metab)
+    assert m.planning_horizon(0.0, cfg.agent.horizon) == cfg.agent.horizon
+    assert m.cognition_cost(10_000) == 0.0
+
+
+def test_cognition_cost_is_proportional():
+    cfg = load_config("cpu_small")
+    cfg.metab.enabled = True
+    m = Metabolism(cfg.metab)
+    assert m.cognition_cost(0) == 0.0
+    assert m.cognition_cost(2000) == 2 * m.cognition_cost(1000) > 0
+
+
+def test_sensorimotor_delays_perception_and_action():
+    cfg = load_config("cpu_small")
+    cfg.metab.enabled = True
+    cfg.metab.obs_delay = 2
+    cfg.metab.action_delay = 1
+    cfg.metab.motor_noise = 0.0
+    smr = Sensorimotor(cfg.metab)
+    o0 = {"x": np.zeros(1)}
+    smr.reset(o0)
+    # obs_delay=2: the first two fresh observations are still the stale o0
+    assert smr.perceive({"x": np.ones(1)})["x"][0] == 0.0
+    assert smr.perceive({"x": np.full(1, 2.0)})["x"][0] == 0.0
+    assert smr.perceive({"x": np.full(1, 3.0)})["x"][0] == 1.0
+    # action_delay=1: the world receives the previous action
+    assert smr.execute(np.array([0.9, -0.9]))[0] == 0.0
+    assert abs(smr.execute(np.array([0.1, 0.1]))[0] - 0.9) < 1e-9
+
+
+def test_sensorimotor_disabled_is_identity():
+    cfg = load_config("cpu_small")
+    cfg.metab.enabled = False
+    smr = Sensorimotor(cfg.metab)
+    smr.reset({"x": np.zeros(1)})
+    obs = {"x": np.full(1, 5.0)}
+    assert smr.perceive(obs) is obs
+    a = np.array([0.5, -0.3])
+    assert np.array_equal(smr.execute(a), a)
+
+
+def test_spend_energy_debits_and_clips():
+    cfg = load_config("cpu_small")
+    env = make_env(cfg, seed=0)
+    env.reset(seed=0)
+    e0 = env.homeostasis.energy
+    env.homeostasis.spend_energy(0.1)
+    assert abs(env.homeostasis.energy - (e0 - 0.1)) < 1e-6
+    env.homeostasis.spend_energy(10.0)          # cannot go below zero
+    assert env.homeostasis.energy == 0.0
+    assert env.homeostasis.dead
+
+
+def test_sparse_latent_fires_fewer_groups():
+    cfg = load_config("cpu_small")
+    cfg.model.sparse_latent = True
+    cfg.model.sparse_frac = 0.5
+    env = make_env(cfg, seed=0)
+    from embodied_agent.model.world_model import WorldModel
+    from embodied_agent.agent.replay import ReplayBuffer
+    from embodied_agent.agent.collect import collect_random
+    import torch
+    buf = ReplayBuffer(cfg.train.buffer_capacity)
+    collect_random(env, buf, 400, np.random.default_rng(0))
+    wm = WorldModel(cfg, env.sensors.spaces)
+    batch = buf.sample(4, cfg.train.seq_len, np.random.default_rng(0))
+    with torch.no_grad():
+        post, _ = wm.rssm.observe(wm.encoder(batch["obs"]),
+                                  batch["prev_action"])
+        z = post.z.reshape(*post.z.shape[:-1], wm.rssm.groups, wm.rssm.classes)
+        frac = float((z.abs().amax(-1) > 0).float().mean())
+    assert abs(frac - 0.5) < 0.1  # ~half the groups fire

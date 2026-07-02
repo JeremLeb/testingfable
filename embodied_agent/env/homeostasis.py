@@ -42,6 +42,13 @@ class Homeostasis:
             "integrity": 1.0 - self.integrity,
         }
 
+    def spend_energy(self, amount: float):
+        """Debit energy for an external cost (e.g. the metabolic cost of
+        cognition, B4). Kept in [0, 1]; can push the body toward death."""
+        if amount:
+            self.energy = float(np.clip(self.energy - amount, 0.0, 1.0))
+            self.dead = self.dead or self.energy <= 0.0
+
     # ------------------------------------------------------------ dynamics
 
     def update(self, env, food_eaten: int) -> tuple[float, bool]:

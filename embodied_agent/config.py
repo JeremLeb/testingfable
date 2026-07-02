@@ -98,6 +98,10 @@ class ModelConfig:
     reward_bins: int = 51
     reward_low: float = -8.0      # symlog-space bin range (symexp(8) ~ 2980)
     reward_high: float = 8.0
+    # B4 sparse cortical code: keep only a fraction of latent groups active
+    # (k-winners-take-all over the discrete groups). Off -> dense (baseline).
+    sparse_latent: bool = False
+    sparse_frac: float = 0.5      # fraction of groups allowed to fire
     recon_scales: dict = field(default_factory=lambda: {
         "vision": 1.0, "retina": 1.0, "touch": 1.0, "proprio": 1.0,
         "intero": 10.0, "smell": 1.0,
@@ -216,6 +220,25 @@ class DevelopmentConfig:
 
 
 @dataclass
+class MetabolismConfig:
+    # B4 -- metabolic cost of cognition & sensorimotor realism. Off by default
+    # so the baseline (free imagination, instantaneous noiseless sensing) holds.
+    enabled: bool = False
+    # cognition costs energy: every imagined step (planning / dreaming) debits
+    # the body's energy, so thinking is not free.
+    cognition_cost: bool = True
+    imagination_energy_cost: float = 6e-7  # energy per imagined step
+    # bounded planning: a low-energy body cannot afford to think far ahead --
+    # the imagination horizon shrinks toward min_horizon as energy falls.
+    bounded_planning: bool = True
+    min_horizon: int = 3
+    # sensorimotor realism: latency (steps) and motor noise on the closed loop.
+    obs_delay: int = 0
+    action_delay: int = 0
+    motor_noise: float = 0.0
+
+
+@dataclass
 class TrainConfig:
     total_steps: int = 30000
     warmup_steps: int = 1500      # random-policy steps before training starts
@@ -245,6 +268,7 @@ class Config:
     neuromod: NeuromodConfig = field(default_factory=NeuromodConfig)
     sleep: SleepConfig = field(default_factory=SleepConfig)
     dev: DevelopmentConfig = field(default_factory=DevelopmentConfig)
+    metab: MetabolismConfig = field(default_factory=MetabolismConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
 
 

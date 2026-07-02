@@ -151,6 +151,28 @@ class RewardConfig:
 
 
 @dataclass
+class NeuromodConfig:
+    # B1 -- neuromodulation & allostasis. Off by default so the deep-RL
+    # baseline (fixed drive weights, fixed learning rate) is preserved.
+    enabled: bool = False
+    # allostasis: interoceptive deficits amplify their drive's weight
+    # super-linearly, so the most-threatened variable dominates arbitration.
+    allostatic: bool = True
+    energy_gain: float = 4.0       # how strongly low energy up-weights feeding
+    integrity_gain: float = 6.0    # near-death integrity dominates
+    thermal_gain: float = 3.0
+    urgency_power: float = 2.0     # super-linear deficit -> urgency
+    # norepinephrine: prediction-error (surprise) raises effective plasticity
+    ne_enabled: bool = True
+    ne_gain: float = 1.5           # max multiplicative boost to the LR
+    ne_ema: float = 0.99           # EMA horizon for the surprise baseline
+    # dopamine: |RPE| tone, logged and (optionally) gates the actor LR
+    da_enabled: bool = True
+    da_gain: float = 0.5
+    da_ema: float = 0.99
+
+
+@dataclass
 class TrainConfig:
     total_steps: int = 30000
     warmup_steps: int = 1500      # random-policy steps before training starts
@@ -177,6 +199,7 @@ class Config:
     intrinsic: IntrinsicConfig = field(default_factory=IntrinsicConfig)
     shield: ShieldConfig = field(default_factory=ShieldConfig)
     reward: RewardConfig = field(default_factory=RewardConfig)
+    neuromod: NeuromodConfig = field(default_factory=NeuromodConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
 
 

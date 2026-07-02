@@ -15,12 +15,14 @@ from __future__ import annotations
 import numpy as np
 
 from ..config import EnvConfig
+from .neuromod import allostatic_weights
 
 
 class Homeostasis:
-    def __init__(self, cfg: EnvConfig, reward_cfg=None):
+    def __init__(self, cfg: EnvConfig, reward_cfg=None, neuromod_cfg=None):
         self.cfg = cfg
         self.reward_cfg = reward_cfg
+        self.neuromod_cfg = neuromod_cfg
         self.reset()
 
     def reset(self):
@@ -77,16 +79,18 @@ class Homeostasis:
         """
         rc = self.reward_cfg
         curr = self.drives()
-        weights = {
-            "energy": rc.w_energy,
-            "thermal": rc.w_thermal,
-            "integrity": rc.w_integrity,
-        }
+        # allostatic weighting: current bodily deficits set how much each drive
+        # matters right now (falls back to the fixed weights if neuromod off).
+        weights = allostatic_weights(curr, rc, self.neuromod_cfg) \
+            if self.neuromod_cfg is not None else {
+                "energy": rc.w_energy, "thermal": rc.w_thermal,
+                "integrity": rc.w_integrity}
         terms = {}
         total = 0.0
         for name, w in weights.items():
             delta = (prev_drives[name] - curr[name]) * w * rc.reward_scale
             terms[f"reward_{name}"] = delta
+            terms[f"weight_{name}"] = w
             total += delta
         if self.dead:
             terms["reward_death"] = -rc.death_penalty

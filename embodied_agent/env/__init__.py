@@ -14,6 +14,7 @@ def make_env(cfg: Config, seed: int = 0) -> PetriEnv:
     env = PetriEnv(cfg.env, cfg.sensor, seed=seed)
     env.sensors = SensorSuite(cfg.sensor, cfg.env,
                               np.random.default_rng(seed + 1))
-    env.homeostasis = Homeostasis(cfg.env, reward_cfg=cfg.reward)
+    env.homeostasis = Homeostasis(cfg.env, reward_cfg=cfg.reward,
+                                  neuromod_cfg=cfg.neuromod)
     env.reset()
     return env

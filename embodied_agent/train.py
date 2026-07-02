@@ -23,6 +23,7 @@ from .agent.collect import collect_random
 from .agent.replay import ReplayBuffer
 from .config import load_config
 from .env import make_env
+from .env.neuromod import Neuromodulators
 from .intrinsic import build_intrinsic
 from .model.world_model import WorldModel
 from .safety import build_shield
@@ -149,6 +150,10 @@ def run(cfg, verbose: bool = True) -> dict:
     shield = build_shield(cfg, env)
     agent = DreamerAgent(wm, ac, device=device, shield=shield)
 
+    # B1: neuromodulators gate learning rates (no-ops unless neuromod.enabled)
+    neuromod = Neuromodulators(cfg.neuromod)
+    base_wm_lr, base_actor_lr = cfg.model.lr, cfg.agent.actor_lr
+
     log = print if verbose else (lambda *a, **k: None)
     log(f"device={device} | wm params "
         f"{sum(p.numel() for p in wm.parameters())/1e3:.0f}k | "
@@ -181,8 +186,10 @@ def run(cfg, verbose: bool = True) -> dict:
                    drive_energy=info["drive_energy"],
                    drive_thermal=info["drive_thermal"],
                    drive_integrity=info["drive_integrity"])
-        for k in ("reward_energy", "reward_thermal", "reward_integrity"):
-            logger.add(**{k: info.get(k, 0.0)})
+        for k in ("reward_energy", "reward_thermal", "reward_integrity",
+                  "weight_energy", "weight_thermal", "weight_integrity"):
+            if k in info:
+                logger.add(**{k: info[k]})
 
         if term or trunc:
             logger.add(ep_reward=ep_reward, ep_len=ep_len,
@@ -205,7 +212,16 @@ def run(cfg, verbose: bool = True) -> dict:
                     intr_metrics = intrinsic.train_step(
                         post.feat().reshape(-1, wm.rssm.feat_dim).detach())
                     logger.add(**intr_metrics)
-                logger.add(**wm_metrics, **ac_metrics)
+                # B1: surprise (prediction error) -> NE plasticity gain on the
+                # world-model LR; |TD error| -> dopamine tone on the actor LR.
+                ne_gain = neuromod.update_surprise(
+                    wm_metrics["recon"] + wm_metrics["kl"])
+                neuromod.update_rpe(ac_metrics["critic_loss"] ** 0.5)
+                for g in wm.opt.param_groups:
+                    g["lr"] = base_wm_lr * ne_gain
+                for g in ac.actor_opt.param_groups:
+                    g["lr"] = base_actor_lr * neuromod.actor_lr_gain()
+                logger.add(**wm_metrics, **ac_metrics, **neuromod.metrics())
 
         if step % cfg.train.log_every == 0:
             row = logger.flush(step)

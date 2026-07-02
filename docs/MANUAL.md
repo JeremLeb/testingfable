@@ -167,32 +167,62 @@ both entry counts and the number of logged interventions. Saves
 
 Flags: `--config`, `--steps` (400), `--seed` (1), `--out` (`runs/shield_demo`).
 
-### 4.7 `python -m embodied_agent.viz.plots` — re-render dashboard
+### 4.7 `python -m embodied_agent.scripts.fear_analysis` — emergent-fear proof
+
+Demonstrates that anticipatory avoidance is *learned*, not coded. Loads a
+trained checkpoint (or trains a short model first if none is given), runs a
+mildly-exploratory trace, and writes `fear_analysis.png` with three
+signatures: (1) the world model's **counterfactual danger** — imagined
+integrity drop under a "keep driving forward" rollout — rising before
+collisions; (2) a **linear latent probe** for "collision within K steps",
+reporting held-out AUC and showing its probability peak a few steps *before*
+contact; (3) the learned policy's **collision rate vs a random policy**. Also
+prints a quantitative summary.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--config` | `cpu_small` | preset |
+| `--checkpoint` | none | trained checkpoint; if omitted, trains `--train-steps` first |
+| `--train-steps` | 12000 | steps to train when no checkpoint is given |
+| `--trace-steps` | 5000 | analysis trace length |
+| `--horizon` | 8 | imagination horizon / probe look-ahead window |
+| `--window` | 12 | ± steps for the event-triggered averages |
+| `--seed` | 0 | seed |
+| `--out` | `runs/fear_analysis` | output dir |
+
+The signature is clearest on a reasonably trained agent (≥ ~15k `cpu_small`
+steps): probe AUC ≈ 0.87, probe probability peaking around lag −4, and ~4×
+fewer collisions than random.
+
+### 4.8 `python -m embodied_agent.viz.plots` — re-render dashboard
 
 ```bash
 python -m embodied_agent.viz.plots runs/cpu_small/metrics.csv out.png
 ```
 
-### 4.8 Tests
+### 4.9 Tests
 
 ```bash
-python -m pytest embodied_agent/tests/ -q          # full suite (~8 min, 23 tests)
+python -m pytest embodied_agent/tests/ -q          # full suite (~2 min, 32 tests)
 python -m pytest embodied_agent/tests/ -q -k "not smoke"   # fast subset
 ```
 
 Covers env dynamics (bounds, energy drain, temperature range, death,
 reward-decomposition consistency, seed determinism), geometry, sensor
 ranges/rates, replay buffer, world-model loss decrease, λ-return math,
-actor-critic step, shield blocking, and two end-to-end training smoke tests.
+actor-critic step, shield blocking, the Tier-1 upgrades (symlog/two-hot,
+discrete straight-through latents, the CNN retina path, AUC + latent probe),
+and three end-to-end training smoke tests (incl. the pixel retina).
 
 ## 5. Configuration reference
 
-Presets live in `embodied_agent/configs/` (`cpu_small.yaml`,
-`gpu_default.yaml`). A YAML preset overrides the dataclass defaults in
-`embodied_agent/config.py`; unknown keys raise an error. Pass either a
-preset name or a YAML path to `--config`. Rates are **per step** unless
-noted; the arena uses abstract length units; all viability variables live in
-[0, 1].
+Presets live in `embodied_agent/configs/`: `cpu_small.yaml` (fast, discrete
+latents + two-hot reward + ray vision), `cpu_pixels.yaml` (CPU smoke of the
+pixel retina + CNN), and `gpu_default.yaml` (full advanced stack). A YAML
+preset overrides the dataclass defaults in `embodied_agent/config.py`;
+unknown keys raise an error. Pass either a preset name or a YAML path to
+`--config`. Rates are **per step** unless noted; the arena uses abstract
+length units; all viability variables live in [0, 1].
 
 ### `env` — world physics and homeostasis
 
@@ -228,25 +258,30 @@ noted; the arena uses abstract length units; all viability variables live in
 
 Death = energy ≤ 0 or integrity ≤ 0; the episode terminates.
 
-### `sensor` — the five modalities
+### `sensor` — the modalities
 
 | Key | Default | Meaning |
 |---|---|---|
-| `n_rays` | 12 | vision rays across the FOV |
-| `fov_deg` | 140 | field of view |
-| `ray_max_dist` | 8.0 | vision range (distances normalized by this) |
+| `vision_mode` | `rays` | `rays` (vector ray-casts) or `pixels` (egocentric RGB retina) |
+| `n_rays` | 12 | vision rays across the FOV (rays mode) |
+| `fov_deg` | 140 | field of view (rays mode) |
+| `ray_max_dist` | 8.0 | vision range, distances normalized by this (rays mode) |
+| `retina_res` | 16 | retina H = W in pixels; keep a power of two for the CNN (pixels mode) |
+| `retina_range` | 7.0 | world units the retina patch spans forward (pixels mode) |
 | `touch_sectors` | 8 | contact-pressure sectors around the body |
 | `touch_decay` | 0.5 | per-step decay of touch activation |
 | `smell_sigma_frac` | 0.25 | food-plume width fraction |
 | `smell_period` | 4 | smell refresh period (holds value between; the multi-rate stressor) |
 | `noise` | per-modality dict | additive Gaussian std applied after encoding |
 
-Observation dict (float32): `vision (n_rays*4)` — per ray, normalized
-distance + one-hot food/wall/none; `touch (sectors)`; `proprio (6)` — speed,
-sin/cos heading, efference copy of last thrust/turn, contact flag;
-`intero (3)` — energy, temperature, integrity; `smell (3)` — tanh
-concentration + egocentric gradient (forward, lateral). Action:
-`[thrust, turn]` in [−1, 1]².
+Observation dict (float32). Vision is **either** `vision (n_rays*4)` — per
+ray, normalized distance + one-hot food/wall/none (rays mode) — **or**
+`retina (3, retina_res, retina_res)` — an egocentric RGB patch with
+wall / food / temperature channels in [0,1] (pixels mode). The rest are
+always present: `touch (sectors)`; `proprio (6)` — speed, sin/cos heading,
+efference copy of last thrust/turn, contact flag; `intero (3)` — energy,
+temperature, integrity; `smell (3)` — tanh concentration + egocentric
+gradient (forward, lateral). Action: `[thrust, turn]` in [−1, 1]².
 
 ### `model` — world model (RSSM)
 
@@ -254,14 +289,22 @@ concentration + egocentric gradient (forward, lateral). Action:
 |---|---|---|
 | `embed_dim` | 128 | fused observation embedding |
 | `deter_dim` | 128 | GRU deterministic state h |
-| `stoch_dim` | 24 | Gaussian stochastic latent z |
 | `hidden` | 128 | MLP width |
+| `cnn_depth` | 16 | base channel count for the retina CNN encoder/decoder |
+| `latent_kind` | `discrete` | stochastic latent: `discrete` (categorical, DreamerV3) or `gaussian` |
+| `latent_groups` | 16 | categorical variables (discrete mode); stoch size = groups × classes |
+| `latent_classes` | 16 | classes per categorical variable (discrete mode) |
+| `unimix` | 0.01 | uniform mixture on categorical probs (prevents dead classes) |
+| `stoch_dim` | 24 | Gaussian latent size (gaussian mode only) |
+| `reward_head` | `twohot` | `twohot` (symlog two-hot classification) or `mse` (scalar regression) |
+| `reward_bins` | 51 | number of symlog bins (twohot mode) |
+| `reward_low` / `reward_high` | −8 / 8 | symlog-space bin range; symexp(8) ≈ 2980 |
 | `lr` | 3e-4 | world-model learning rate |
 | `kl_beta` | 1.0 | KL weight |
-| `kl_balance` | 0.8 | fraction of KL gradient training prior→posterior |
+| `kl_balance` | 0.8 | fraction of KL gradient training prior→posterior (dynamics vs representation) |
 | `free_bits` | 1.0 | nats of KL below which no gradient flows |
 | `grad_clip` | 100.0 | gradient norm clip |
-| `recon_scales` | intero=10, rest=1 | per-modality reconstruction weights (intero is tiny but is the reward source, so it is upweighted) |
+| `recon_scales` | intero=10, rest=1 | per-modality reconstruction weights (intero is tiny but is the reward source, so it is upweighted; `retina` defaults to 1) |
 
 ### `agent` — actor-critic in imagination
 
@@ -352,9 +395,14 @@ dashed circle = forbidden zone.
 ## 7. Extending the sandbox
 
 - **New sensor**: add a method + entry in `SensorSuite.observe()`
-  (`env/sensors.py`) and its size in `spaces`. Encoders/decoders pick it up
-  automatically from the spaces dict; add a `recon_scales` entry if it needs
+  (`env/sensors.py`) and its spec in `spaces` — a bare `int` for a vector
+  modality, or `ModalitySpec((C, H, W), "image")` for an image (see
+  `model/spaces.py`). `MultiEncoder`/`MultiDecoder` dispatch on the spec kind
+  (MLP vs CNN) automatically; add a `recon_scales` entry if it needs
   weighting.
+- **New latent or reward head**: the RSSM latent (`model/rssm.py`) and reward
+  head (`model/world_model.py`) are selected by `model.latent_kind` /
+  `model.reward_head`; add a branch and a config value to introduce another.
 - **New drive**: add the variable + dynamics in `env/homeostasis.py`
   (`update`, `drives`, `info`), a weight in `RewardConfig`, and the term in
   `_reward()`.

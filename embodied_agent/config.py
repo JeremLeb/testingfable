@@ -54,10 +54,15 @@ class EnvConfig:
 
 @dataclass
 class SensorConfig:
+    # vision mode: "rays" (vector ray-casts) or "pixels" (egocentric retina)
+    vision_mode: str = "rays"
     # vision: egocentric ray-casts returning distance + hit channel
     n_rays: int = 12
     fov_deg: float = 140.0
     ray_max_dist: float = 8.0
+    # retina (pixels): egocentric rasterized RGB patch in front of the agent
+    retina_res: int = 16          # H = W (keep a power of two for the CNN)
+    retina_range: float = 7.0     # world units the patch spans forward
     # touch: contact pressure per body sector
     touch_sectors: int = 8
     touch_decay: float = 0.5      # per-step decay of touch activation
@@ -75,15 +80,26 @@ class SensorConfig:
 class ModelConfig:
     embed_dim: int = 128          # fused embedding fed to the RSSM posterior
     deter_dim: int = 128          # GRU deterministic state h
-    stoch_dim: int = 24           # Gaussian stochastic latent z
     hidden: int = 128             # MLP hidden width
+    cnn_depth: int = 16           # base channel count for image encoder/decoder
     lr: float = 3e-4
     kl_beta: float = 1.0
     kl_balance: float = 0.8       # weight on training the prior toward posterior
     free_bits: float = 1.0        # nats of KL below which no gradient flows
     grad_clip: float = 100.0
+    # stochastic latent: "discrete" (categorical, DreamerV3) or "gaussian"
+    latent_kind: str = "discrete"
+    latent_groups: int = 16       # categorical variables (discrete)
+    latent_classes: int = 16      # classes per variable (discrete)
+    unimix: float = 0.01          # uniform mixture on categorical probs
+    stoch_dim: int = 24           # Gaussian latent size (gaussian only)
+    # reward head: "twohot" (symlog two-hot classification) or "mse"
+    reward_head: str = "twohot"
+    reward_bins: int = 51
+    reward_low: float = -8.0      # symlog-space bin range (symexp(8) ~ 2980)
+    reward_high: float = 8.0
     recon_scales: dict = field(default_factory=lambda: {
-        "vision": 1.0, "touch": 1.0, "proprio": 1.0,
+        "vision": 1.0, "retina": 1.0, "touch": 1.0, "proprio": 1.0,
         "intero": 10.0, "smell": 1.0,
     })
 

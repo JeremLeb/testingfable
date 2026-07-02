@@ -1,10 +1,16 @@
 """The world model: encoders + RSSM + decoders + reward/continue heads.
 
 Trains on real sequences from the replay buffer. Loss = per-modality
-reconstruction (Gaussian NLL / MSE) + balanced KL with free bits + reward
-regression + continue (Bernoulli) prediction. This is the prediction-error
-substrate: with the reward/continue heads ablated it still learns a usable
-model of the sensory stream (a milestone-8 ablation checks exactly this).
+reconstruction + balanced KL (with free bits) + reward + continue. This is
+the prediction-error substrate: with the reward/continue heads ablated it
+still learns a usable model of the sensory stream (the --no-reward ablation
+in scripts/train_world_model.py checks exactly this).
+
+Advanced (Tier 1) options, selected from config:
+  * discrete categorical latents in the RSSM (vs the original Gaussian)
+  * a symlog two-hot reward head (vs plain MSE), robust to the wide reward
+    range this environment produces
+  * image modalities (the pixel retina) reconstructed by a CNN decoder
 """
 from __future__ import annotations
 
@@ -13,25 +19,35 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ..config import Config
+from .distributions import TwoHotHead
 from .networks import MultiDecoder, MultiEncoder, mlp
-from .rssm import RSSM, RSSMState, kl_divergence
+from .rssm import RSSM, RSSMState
 
 
 class WorldModel(nn.Module):
-    def __init__(self, cfg: Config, obs_spaces: dict[str, int],
-                 action_dim: int = 2):
+    def __init__(self, cfg: Config, obs_spaces: dict, action_dim: int = 2):
         super().__init__()
         self.cfg = cfg
         mc = cfg.model
         self.obs_spaces = obs_spaces
         self.recon_scales = mc.recon_scales
 
-        self.encoder = MultiEncoder(obs_spaces, mc.embed_dim, mc.hidden)
-        self.rssm = RSSM(action_dim, mc.embed_dim, mc.deter_dim,
-                         mc.stoch_dim, mc.hidden)
+        self.encoder = MultiEncoder(obs_spaces, mc.embed_dim, mc.hidden,
+                                    mc.cnn_depth)
+        self.rssm = RSSM(
+            action_dim, mc.embed_dim, mc.deter_dim, mc.hidden,
+            latent_kind=mc.latent_kind, stoch_dim=mc.stoch_dim,
+            groups=mc.latent_groups, classes=mc.latent_classes,
+            unimix=mc.unimix)
         feat = self.rssm.feat_dim
-        self.decoder = MultiDecoder(obs_spaces, feat, mc.hidden)
-        self.reward_head = mlp(feat, mc.hidden, 1, layers=2)
+        self.decoder = MultiDecoder(obs_spaces, feat, mc.hidden, mc.cnn_depth)
+
+        self.reward_kind = mc.reward_head
+        if self.reward_kind == "twohot":
+            self.reward_head = TwoHotHead(feat, mc.hidden, mc.reward_bins,
+                                          mc.reward_low, mc.reward_high)
+        else:
+            self.reward_head = mlp(feat, mc.hidden, 1, layers=2)
         self.cont_head = mlp(feat, mc.hidden, 1, layers=2)
 
         self.opt = torch.optim.Adam(self.parameters(), lr=mc.lr)
@@ -39,10 +55,17 @@ class WorldModel(nn.Module):
     # ------------------------------------------------------------ prediction
 
     def predict_reward(self, feat: torch.Tensor) -> torch.Tensor:
+        if self.reward_kind == "twohot":
+            return self.reward_head.mean(feat)
         return self.reward_head(feat).squeeze(-1)
 
     def predict_cont(self, feat: torch.Tensor) -> torch.Tensor:
         return torch.sigmoid(self.cont_head(feat)).squeeze(-1)
+
+    def _reward_loss(self, feat, target):
+        if self.reward_kind == "twohot":
+            return self.reward_head.loss(feat, target).mean()
+        return F.mse_loss(self.reward_head(feat).squeeze(-1), target)
 
     # ------------------------------------------------------------ loss
 
@@ -51,21 +74,21 @@ class WorldModel(nn.Module):
         actions = batch["prev_action"]
         B, T = actions.shape[:2]
 
-        embeds = self.encoder({k: v for k, v in obs.items()})
+        embeds = self.encoder(obs)
         post, prior = self.rssm.observe(embeds, actions)
         feat = post.feat()
 
         recon = self.decoder(feat)
-        recon_losses = {}
-        recon_total = feat.new_zeros(())
+        recon_losses, recon_total = {}, feat.new_zeros(())
         for name, target in obs.items():
-            per = F.mse_loss(recon[name], target, reduction="none").sum(-1)
+            err = (recon[name] - target).reshape(B, T, -1)
+            per = (err ** 2).sum(-1)                     # sum over features
             scaled = self.recon_scales.get(name, 1.0) * per.mean()
             recon_losses[name] = scaled
             recon_total = recon_total + scaled
 
-        kl = kl_divergence(post, prior, self.cfg.model.free_bits,
-                           self.cfg.model.kl_balance).mean()
+        kl = self.rssm.kl_loss(post, prior, self.cfg.model.free_bits,
+                               self.cfg.model.kl_balance).mean()
 
         loss = recon_total + self.cfg.model.kl_beta * kl
         s = lambda x: float(x.detach())  # noqa: E731
@@ -74,11 +97,9 @@ class WorldModel(nn.Module):
             metrics[f"recon_{name}"] = s(v)
 
         if use_reward:
-            rew_pred = self.predict_reward(feat)
-            rew_loss = F.mse_loss(rew_pred, batch["reward"])
-            cont_pred = self.cont_head(feat).squeeze(-1)
+            rew_loss = self._reward_loss(feat, batch["reward"])
             cont_loss = F.binary_cross_entropy_with_logits(
-                cont_pred, batch["cont"])
+                self.cont_head(feat).squeeze(-1), batch["cont"])
             loss = loss + rew_loss + cont_loss
             metrics["reward"] = s(rew_loss)
             metrics["cont"] = s(cont_loss)
@@ -102,9 +123,7 @@ class WorldModel(nn.Module):
     def open_loop_error(self, batch: dict, context: int) -> dict:
         """Multi-step prediction error: filter `context` steps with the
         posterior, then roll the prior open-loop for the remainder and
-        measure per-step reconstruction MSE against the real observations.
-        Decreasing error here is the milestone-4 success signal.
-        """
+        measure per-step reconstruction MSE against the real observations."""
         obs = batch["obs"]
         actions = batch["prev_action"]
         T = actions.shape[1]

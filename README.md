@@ -46,8 +46,10 @@ extension point, and troubleshooting table: [docs/MANUAL.md](docs/MANUAL.md).
   blocking obstacles. Gymnasium-style `reset`/`step`, no physics-engine
   dependency.
 - **Senses** (`env/sensors.py`) — multi-rate, egocentric, correlated:
-  - *vision* — egocentric ray-casts returning normalized distance + a
-    food/wall/none channel,
+  - *vision* — either egocentric ray-casts (normalized distance + a
+    food/wall/none channel) **or a rasterized RGB pixel retina** (walls /
+    food / temperature channels) parsed by a CNN — selected by
+    `sensor.vision_mode`,
   - *touch* — decaying contact pressure per body sector,
   - *proprioception* — speed, heading, and efference copy of the last motor
     command,
@@ -55,10 +57,14 @@ extension point, and troubleshooting table: [docs/MANUAL.md](docs/MANUAL.md).
     source of reward),
   - *smell* — a slow chemical gradient toward food that refreshes at a lower
     rate than vision, forcing heterogeneous-rate fusion.
-- **World model** (`model/`) — an RSSM-lite (Dreamer lineage): per-modality
-  encoders fuse into one embedding; a GRU deterministic state `h` plus a
-  Gaussian stochastic latent `z`; per-modality decoders and reward/continue
-  heads. Loss = reconstruction + balanced KL (free bits) + reward + continue.
+- **World model** (`model/`) — an RSSM (Dreamer lineage): per-modality
+  encoders (MLP for vectors, CNN for the retina) fuse into one embedding; a
+  GRU deterministic state `h` plus a stochastic latent `z` that is by default
+  a **vector of discrete categoricals** with straight-through samples
+  (DreamerV3; Gaussian still selectable via `model.latent_kind`); per-modality
+  decoders and a **symlog two-hot reward head** (robust to the wide reward
+  range) plus a continue head. Loss = reconstruction + balanced KL (free bits)
+  + reward + continue.
 - **Actor-critic in imagination** (`agent/`) — a reparameterized
   tanh-Gaussian actor and a value critic (EMA target) trained on imagined
   rollouts of the prior dynamics from real posterior start states, using
@@ -101,6 +107,15 @@ python -m embodied_agent.scripts.shield_demo --config cpu_small
 # evaluate a checkpoint
 python -m embodied_agent.evaluate --config cpu_small \
     --checkpoint runs/cpu_small/checkpoint.pt --gif
+
+# advanced: the pixel-retina + CNN world model (heavier; GPU-friendly)
+python -m embodied_agent.train --config cpu_pixels
+python -m embodied_agent.train --config gpu_default   # full stack on GPU
+
+# advanced: measure that fear is *learned* — the model foresees damage and
+# the latent encodes "collision imminent" before contact (writes a figure)
+python -m embodied_agent.scripts.fear_analysis --config cpu_small \
+    --checkpoint runs/cpu_small/checkpoint.pt
 ```
 
 Outputs land in `runs/<name>/`: `metrics.csv`, `metrics.png` (the
@@ -116,6 +131,44 @@ rollout GIFs, and a checkpoint.
 | food eaten / episode | ≈ 5 | ≈ 1 |
 | exploration coverage | ≈ 40 cells | ≈ 11 cells |
 | world-model open-loop MSE | ≈ 0.037 (from 0.42) | — |
+
+## Advanced (Tier 1) upgrades
+
+The core sandbox is deliberately minimal; these upgrades make the
+representation and perception substantially more capable while keeping
+`cpu_small` runnable in minutes. All are config-selectable and default-on in
+the advanced presets.
+
+- **Discrete categorical latents** (`model.latent_kind: discrete`) — the RSSM
+  stochastic state is a vector of categorical variables with straight-through
+  one-hot samples and a small uniform mixture (DreamerV3). Multimodal and
+  collapse-resistant; the KL stays healthy at the free-bits floor instead of
+  vanishing. The original diagonal Gaussian is kept for ablation.
+- **Symlog two-hot reward head** (`model.reward_head: twohot`) — reward is
+  predicted as a distribution over symlog-spaced bins via cross-entropy
+  instead of MSE. This is robust to the environment's wide reward range (tiny
+  per-step drive drift vs large food/collision spikes) with no reward
+  normalization.
+- **Pixel retina + CNN** (`sensor.vision_mode: pixels`) — an egocentric
+  rasterized RGB patch (walls / food / temperature) replaces the hand-parsed
+  ray-casts, so the world model must learn spatial structure from raw pixels
+  through a small conv encoder and a transposed-conv decoder. See
+  `configs/cpu_pixels.yaml` (CPU smoke) and `configs/gpu_default.yaml`
+  (32×32 retina, large latents).
+- **Emergent-fear measurement** (`scripts/fear_analysis.py`,
+  `analysis/fear.py`) — turns the "fear is learned, not coded" claim into
+  evidence. On a trained `cpu_small` agent it shows all three signatures:
+  the world model's **counterfactual danger prediction** ("if I kept driving
+  forward") rises approaching a wall; a **linear latent probe** reads
+  "collision within K steps" at **AUC ≈ 0.87**, peaking a few steps *before*
+  contact; and the learned policy collides **~4× less** than random. None of
+  this is hardcoded — it falls out of predicting interoceptive damage as just
+  another modality.
+
+  ![emergent fear analysis](docs/assets/fear_analysis.png)
+
+The GPU preset (`gpu_default`) enables the full stack: 32×32 pixel retina,
+32×32 categorical latents, a 512-d deterministic state, and long training.
 
 (Exact numbers vary by seed; the *direction* — policy beats random on reward,
 food, and coverage; open-loop prediction error falls — is the point.)

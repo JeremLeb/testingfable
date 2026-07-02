@@ -1,4 +1,6 @@
 # Laptop-CPU preset: tiny nets, short horizons, learning visible in minutes.
+# Uses discrete categorical latents (small) + symlog two-hot reward, with the
+# fast ray-cast vision. For the pixel retina on CPU, see cpu_pixels.yaml.
 env:
   arena_size: 16.0
   max_episode_steps: 600
@@ -9,8 +11,12 @@ env:
 model:
   embed_dim: 64
   deter_dim: 64
-  stoch_dim: 16
   hidden: 64
+  latent_kind: discrete
+  latent_groups: 8
+  latent_classes: 8
+  reward_head: twohot
+  reward_bins: 41
 agent:
   horizon: 8
 train:

@@ -1,0 +1,38 @@
+# CPU preset exercising the pixel retina + CNN world model. Heavier than
+# cpu_small (conv nets, image reconstruction) but still CPU-runnable for a
+# smoke run; the retina really wants a GPU (see gpu_default).
+env:
+  arena_size: 16.0
+  max_episode_steps: 600
+  n_food: 6
+  food_radius: 0.45
+  food_energy: 0.45
+  n_obstacles: 2
+sensor:
+  vision_mode: pixels
+  retina_res: 16
+  retina_range: 7.0
+model:
+  embed_dim: 96
+  deter_dim: 96
+  hidden: 96
+  cnn_depth: 12
+  latent_kind: discrete
+  latent_groups: 12
+  latent_classes: 12
+  reward_head: twohot
+  reward_bins: 41
+agent:
+  horizon: 8
+train:
+  total_steps: 15000
+  warmup_steps: 1000
+  seq_len: 12
+  batch_size: 12
+  train_every: 8
+  log_every: 500
+  eval_every: 5000
+  gif_every: 8000
+  buffer_capacity: 40000
+  device: cpu
+  out_dir: runs/cpu_pixels

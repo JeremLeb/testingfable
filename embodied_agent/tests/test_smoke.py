@@ -28,3 +28,11 @@ def test_train_smoke_rnd_and_shield(tmp_path):
     cfg.train.out_dir = str(tmp_path / "run")
     summary = run(cfg, verbose=False)
     assert summary["final"]["eval_length"] > 0
+
+
+def test_train_smoke_pixel_retina(tmp_path):
+    # exercises the CNN retina end-to-end (collect -> replay -> imagine)
+    cfg = _tiny(load_config("cpu_pixels"))
+    cfg.train.out_dir = str(tmp_path / "run")
+    summary = run(cfg, verbose=False)
+    assert "final" in summary

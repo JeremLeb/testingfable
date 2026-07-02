@@ -15,6 +15,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..config import EnvConfig, SensorConfig
+from ..model.spaces import ModalitySpec
 from . import geometry as geo
 
 
@@ -24,17 +25,21 @@ class SensorSuite:
         self.cfg = cfg
         self.env_cfg = env_cfg
         self.rng = rng
+        self.pixels = cfg.vision_mode == "pixels"
         self.reset()
 
     @property
-    def spaces(self) -> dict[str, int]:
-        return {
-            "vision": self.cfg.n_rays * 4,
+    def spaces(self) -> dict:
+        common = {
             "touch": self.cfg.touch_sectors,
             "proprio": 6,
             "intero": 3,
             "smell": 3,
         }
+        if self.pixels:
+            r = self.cfg.retina_res
+            return {"retina": ModalitySpec((3, r, r), "image"), **common}
+        return {"vision": self.cfg.n_rays * 4, **common}
 
     def reset(self):
         self._touch = np.zeros(self.cfg.touch_sectors, dtype=np.float64)
@@ -66,6 +71,43 @@ class SensorSuite:
             else:
                 out[i] = [dist / cfg.ray_max_dist, 0.0, 1.0, 0.0]  # wall
         return out.reshape(-1)
+
+    def _retina(self, env) -> np.ndarray:
+        """Egocentric rasterized RGB patch in front of the agent.
+
+        R = wall / out-of-bounds occupancy, G = soft food blobs, B = ambient
+        temperature. The patch is a forward-looking rectangle in the agent's
+        frame, so the CNN world model must learn spatial structure from raw
+        pixels rather than being handed parsed distances.
+        """
+        cfg = self.cfg
+        res, rng_ = cfg.retina_res, cfg.retina_range
+        fwd = np.linspace(0.3, rng_, res)                  # cols: forward dist
+        lat = np.linspace(-rng_ / 2, rng_ / 2, res)        # rows: lateral
+        ff, ll = np.meshgrid(fwd, lat)                     # (res, res)
+        cos_h, sin_h = np.cos(env.heading), np.sin(env.heading)
+        dir_f = np.array([cos_h, sin_h])
+        dir_l = np.array([-sin_h, cos_h])
+        wx = env.pos[0] + ff * dir_f[0] + ll * dir_l[0]
+        wy = env.pos[1] + ff * dir_f[1] + ll * dir_l[1]
+
+        S = env.cfg.arena_size
+        walls = (wx < 0) | (wx > S) | (wy < 0) | (wy > S)
+        for (x, y, w, h) in env.obstacles:
+            walls = walls | ((wx >= x) & (wx <= x + w)
+                             & (wy >= y) & (wy <= y + h))
+
+        food = np.zeros_like(ff)
+        s = env.cfg.food_radius * 1.6
+        for f in env.foods:
+            if f.active:
+                d2 = (wx - f.pos[0]) ** 2 + (wy - f.pos[1]) ** 2
+                food = np.maximum(food, np.exp(-d2 / (2 * s * s)))
+
+        pts = np.stack([wx, wy], axis=-1)
+        temp = env.temperature(pts)
+        img = np.stack([walls.astype(np.float64), food, temp], axis=0)
+        return img.astype(np.float32)                      # (3, res, res)
 
     def _update_touch(self, env):
         self._touch *= self.cfg.touch_decay
@@ -105,8 +147,10 @@ class SensorSuite:
         if self._steps % self.cfg.smell_period == 0:
             self._update_smell(env)
         self._steps += 1
+        vision = {"retina": self._retina(env)} if self.pixels \
+            else {"vision": self._vision(env)}
         obs = {
-            "vision": self._vision(env),
+            **vision,
             "touch": self._touch.copy(),
             "proprio": self._proprio(env),
             "intero": self._intero(env),
@@ -116,5 +160,7 @@ class SensorSuite:
             std = self.cfg.noise.get(name, 0.0)
             if std > 0:
                 arr = arr + self.rng.normal(0.0, std, arr.shape)
+            if name == "retina":
+                arr = np.clip(arr, 0.0, 1.0)
             obs[name] = arr.astype(np.float32)
         return obs

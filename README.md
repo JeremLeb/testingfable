@@ -11,6 +11,9 @@ ways and the senses cross-predict one another.
 Runs on a laptop CPU in the `cpu_small` preset and shows visible learning in
 minutes; scales up with `gpu_default`.
 
+**Full operating manual** — every command, flag, config key, output column,
+extension point, and troubleshooting table: [docs/MANUAL.md](docs/MANUAL.md).
+
 ## Design philosophy
 
 1. **Prediction error is the substrate.** ~99% of the learning signal is

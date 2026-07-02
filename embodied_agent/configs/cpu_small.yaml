@@ -1,0 +1,24 @@
+# Laptop-CPU preset: tiny nets, short horizons, learning visible in minutes.
+env:
+  arena_size: 16.0
+  max_episode_steps: 600
+  n_food: 5
+  n_obstacles: 2
+model:
+  embed_dim: 64
+  deter_dim: 64
+  stoch_dim: 16
+  hidden: 64
+agent:
+  horizon: 8
+train:
+  total_steps: 12000
+  warmup_steps: 800
+  seq_len: 16
+  batch_size: 8
+  train_every: 8
+  log_every: 250
+  eval_every: 3000
+  gif_every: 6000
+  device: cpu
+  out_dir: runs/cpu_small

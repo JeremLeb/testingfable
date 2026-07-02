@@ -1,0 +1,26 @@
+# GPU preset: larger nets and longer training.
+env:
+  arena_size: 24.0
+  max_episode_steps: 1500
+  n_food: 8
+  n_obstacles: 4
+sensor:
+  n_rays: 16
+model:
+  embed_dim: 256
+  deter_dim: 256
+  stoch_dim: 32
+  hidden: 256
+agent:
+  horizon: 15
+train:
+  total_steps: 200000
+  warmup_steps: 5000
+  seq_len: 32
+  batch_size: 32
+  train_every: 4
+  log_every: 1000
+  eval_every: 20000
+  gif_every: 50000
+  device: cuda
+  out_dir: runs/gpu_default

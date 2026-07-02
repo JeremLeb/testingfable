@@ -1,0 +1,71 @@
+# Biologically-plausible preset (Phase 1): the same tiny CPU model as
+# cpu_small, but with every Phase-1 biological mechanism switched ON, so a
+# single run exercises B1-B4 together. Each switch also flips independently for
+# the head-to-head ablations against the deep-RL baseline (cpu_small).
+#
+#   python -m embodied_agent.train --config cpu_bio
+#
+# B1 neuromodulation & allostasis  -> neuromod.enabled
+# B2 sleep, consolidation, dreaming -> sleep.enabled
+# B3 continual life & critical periods -> dev.enabled
+# B4 metabolic cost of cognition & sensorimotor realism -> metab.enabled,
+#    model.sparse_latent
+env:
+  arena_size: 16.0
+  max_episode_steps: 600
+  n_food: 6
+  food_radius: 0.45
+  food_energy: 0.45
+  n_obstacles: 2
+model:
+  embed_dim: 64
+  deter_dim: 64
+  hidden: 64
+  latent_kind: discrete
+  latent_groups: 8
+  latent_classes: 8
+  reward_head: twohot
+  reward_bins: 41
+  # B4 sparse cortical code: keep 6 of 8 latent groups active (k-winners)
+  sparse_latent: true
+  sparse_frac: 0.75
+agent:
+  horizon: 8
+# B1 -- interoceptive state re-weights drives; surprise/RPE gate plasticity
+neuromod:
+  enabled: true
+# B2 -- circadian wake/sleep with prioritized ("emotional") replay + dreaming
+sleep:
+  enabled: true
+  day_steps: 600
+  wake_frac: 0.8
+  sleep_updates: 40
+  prioritized: true
+  dream: true
+# B3 -- one continual life with an early critical period (annealed plasticity)
+dev:
+  enabled: true
+  continual: true
+  critical_period: true
+  young_gain: 3.0
+  floor_gain: 0.7
+  critical_period_steps: 6000
+# B4 -- cognition costs energy, planning is energy-bounded, sensing has latency
+metab:
+  enabled: true
+  cognition_cost: true
+  bounded_planning: true
+  min_horizon: 3
+  obs_delay: 1
+  motor_noise: 0.02
+train:
+  total_steps: 20000
+  warmup_steps: 1000
+  seq_len: 16
+  batch_size: 12
+  train_every: 6
+  log_every: 500
+  eval_every: 4000
+  gif_every: 10000
+  device: cpu
+  out_dir: runs/cpu_bio

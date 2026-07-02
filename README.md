@@ -173,6 +173,66 @@ The GPU preset (`gpu_default`) enables the full stack: 32×32 pixel retina,
 (Exact numbers vary by seed; the *direction* — policy beats random on reward,
 food, and coverage; open-loop prediction error falls — is the point.)
 
+## Biological plausibility (Phase 1)
+
+Tier 1 sharpened *what* the agent represents; this layer changes *how it
+learns* toward the way biology learns. Each mechanism maps a named biological
+idea onto one integration point, ships a measurement, and is a **config
+switch** — the deep-RL baseline (`cpu_small`) is never removed, so every change
+is a clean A/B ablation with the same seed. Turn the whole layer on at once
+with **`configs/cpu_bio.yaml`**:
+
+```bash
+python -m embodied_agent.train --config cpu_bio      # B1–B4 all on
+python -m embodied_agent.scripts.neuromod_demo --config cpu_small      # B1
+python -m embodied_agent.scripts.sleep_demo --config cpu_small         # B2
+python -m embodied_agent.scripts.development_demo --config cpu_small   # B3
+python -m embodied_agent.scripts.metabolism_demo --config cpu_small    # B4
+```
+
+- **B1 — Neuromodulation & allostasis** (`neuromod.enabled`). Drive weights stop
+  being hand-set constants: interoceptive deficits re-weight each drive
+  super-linearly (a low-energy body up-weights feeding; near-death integrity
+  dominates — *allostasis*). A norepinephrine-like surprise signal (EMA of
+  world-model prediction error) raises the effective learning rate, and a
+  dopamine-like |TD-error| tone gates the actor. The energy weight spikes as
+  energy falls — arbitration becomes state-dependent, not fixed.
+
+  ![neuromodulation & allostasis](docs/assets/neuromod_demo.png)
+
+- **B2 — Sleep, consolidation & dreaming** (`sleep.enabled`). A circadian clock
+  splits life into wake (forage, *light* adaptation) and sleep (the bulk of
+  consolidation). Replay becomes **salience-weighted** — high-|reward|
+  ("emotional", near-death) memories are replayed preferentially — and
+  **dreaming** adds extra imagination passes. Prioritized replay concentrates on
+  salient memories and drives their world-model error down faster than uniform.
+
+  ![sleep, consolidation & dreaming](docs/assets/sleep_demo.png)
+
+- **B3 — Continual life & critical periods** (`dev.enabled`). One irreversible
+  life instead of resampled episodes: truncation only *segments* memory while
+  the same body, recurrent state, and age carry on; only death starts a new
+  individual. Plasticity is high at birth and anneals to a mature floor (a
+  **critical period**), so early experience imprints and resists being
+  overwritten when the world later changes.
+
+  ![development & critical periods](docs/assets/development_demo.png)
+
+- **B4 — Metabolic cost of cognition & sensorimotor realism** (`metab.enabled`,
+  `model.sparse_latent`). Thinking is no longer free: every imagined step debits
+  the body's energy, and the affordable planning horizon shrinks as energy falls
+  (the agent **thinks less when starving**). The closed loop gains sensory/motor
+  latency and motor noise, and an optional **k-winners** latent fires only a
+  fraction of its groups (sparse cortical assemblies).
+
+  ![metabolic cost of cognition](docs/assets/metabolism_demo.png)
+
+Each demo runs the mechanism **on vs its ablation** (several take `--ablate` for
+the end-to-end comparison). The head-to-head switches: allostatic vs fixed drive
+weights (survival); salience-prioritized vs uniform replay (consolidation of
+salient memories); critical-period vs constant plasticity (early-experience
+imprinting); energy-bounded vs free planning (planning depth vs energy).
+
 ## Arbitration (which drive is winning)
 
 Reward is an explicit weighted sum of energy, thermal, and integrity drive
@@ -246,16 +306,19 @@ sharpen the separation.
 
 ```
 embodied_agent/
-  env/         arena, sensors, homeostasis, geometry
-  model/       encoders/decoders, rssm, world model + heads
-  agent/       actor-critic, imagination, replay, online agent
+  env/         arena, sensors, homeostasis, geometry, neuromod (B1)
+  model/       encoders/decoders, rssm (sparse latent, B4), world model + heads
+  agent/       actor-critic, imagination, replay (salience, B2), online agent,
+               sleep (B2), development (B3), metabolism (B4)
   intrinsic/   RND, ensemble disagreement
   safety/      hard-constraint shield
-  configs/     cpu_small.yaml, gpu_default.yaml
+  configs/     cpu_small.yaml, cpu_pixels.yaml, cpu_bio.yaml, gpu_default.yaml
   viz/         arena renderer, metrics plots
-  scripts/     random_rollout, train_world_model, ablation, shield_demo
-  tests/       env, sensors, replay, model, shield, smoke
-  train.py     end-to-end training (run(cfg))
+  scripts/     random_rollout, train_world_model, ablation, shield_demo,
+               fear_analysis, neuromod_demo, sleep_demo, development_demo,
+               metabolism_demo
+  tests/       env, sensors, replay, model, shield, advanced, bio, smoke
+  train.py     end-to-end training (run(cfg)); wake/sleep + continual life
   evaluate.py  load a checkpoint and report vs random
 ```
 

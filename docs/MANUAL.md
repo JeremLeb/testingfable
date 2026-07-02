@@ -200,10 +200,23 @@ fewer collisions than random.
 python -m embodied_agent.viz.plots runs/cpu_small/metrics.csv out.png
 ```
 
-### 4.9 Tests
+### 4.9 Biological-mechanism demos (Phase 1)
+
+Each writes a figure showing the mechanism **on vs its ablation**; several take
+`--ablate` for the end-to-end comparison.
 
 ```bash
-python -m pytest embodied_agent/tests/ -q          # full suite (~2 min, 32 tests)
+python -m embodied_agent.scripts.neuromod_demo --config cpu_small       # B1
+python -m embodied_agent.scripts.sleep_demo --config cpu_small          # B2
+python -m embodied_agent.scripts.development_demo --config cpu_small     # B3
+python -m embodied_agent.scripts.metabolism_demo --config cpu_small      # B4
+python -m embodied_agent.train --config cpu_bio                          # all on
+```
+
+### 4.10 Tests
+
+```bash
+python -m pytest embodied_agent/tests/ -q          # full suite
 python -m pytest embodied_agent/tests/ -q -k "not smoke"   # fast subset
 ```
 
@@ -212,13 +225,17 @@ reward-decomposition consistency, seed determinism), geometry, sensor
 ranges/rates, replay buffer, world-model loss decrease, λ-return math,
 actor-critic step, shield blocking, the Tier-1 upgrades (symlog/two-hot,
 discrete straight-through latents, the CNN retina path, AUC + latent probe),
-and three end-to-end training smoke tests (incl. the pixel retina).
+the Phase-1 biological modules (`tests/test_bio.py`: allostatic weighting,
+prioritized-replay ordering, wake/sleep phase, plasticity annealing, continual
+life across truncation, bounded planning, sensorimotor delay, sparse latent),
+and end-to-end training smoke tests (incl. the pixel retina).
 
 ## 5. Configuration reference
 
 Presets live in `embodied_agent/configs/`: `cpu_small.yaml` (fast, discrete
 latents + two-hot reward + ray vision), `cpu_pixels.yaml` (CPU smoke of the
-pixel retina + CNN), and `gpu_default.yaml` (full advanced stack). A YAML
+pixel retina + CNN), `cpu_bio.yaml` (cpu_small with all Phase-1 biological
+mechanisms on), and `gpu_default.yaml` (full advanced stack). A YAML
 preset overrides the dataclass defaults in `embodied_agent/config.py`;
 unknown keys raise an error. Pass either a preset name or a YAML path to
 `--config`. Rates are **per step** unless noted; the arena uses abstract
@@ -346,8 +363,63 @@ gradient (forward, lateral). Action: `[thrust, turn]` in [−1, 1]².
 | `reward_scale` | 100.0 | drives move slowly; rescales to O(1) rewards |
 
 Reward per step = Σ w · (drive_before − drive_after) · scale − death penalty.
-These weights are the hand-set arbitration; changing them changes the
-agent's priorities directly (biology does this with neuromodulation).
+These weights are the hand-set arbitration (the deep-RL baseline); with B1
+(`neuromod`) enabled they instead become the *base* weights that the body's
+interoceptive state re-weights dynamically.
+
+### Biological mechanisms (Phase 1) — `neuromod`, `sleep`, `dev`, `metab`
+
+All four groups are **off by default** so the deep-RL baseline is preserved;
+`configs/cpu_bio.yaml` turns them all on. Each is a clean ablation switch.
+
+**`neuromod` — B1 neuromodulation & allostasis**
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | false | master switch |
+| `allostatic` | true | interoceptive deficits re-weight their drive super-linearly |
+| `energy_gain`, `integrity_gain`, `thermal_gain` | 4, 6, 3 | how strongly each deficit up-weights its drive |
+| `urgency_power` | 2.0 | super-linear exponent on the deficit |
+| `ne_enabled`, `ne_gain`, `ne_ema` | true, 1.5, 0.99 | norepinephrine: surprise (prediction error) raises the LR up to ×`ne_gain` |
+| `da_enabled`, `da_gain`, `da_ema` | true, 0.5, 0.99 | dopamine: |TD-error| tone gates the actor LR |
+
+**`sleep` — B2 sleep, consolidation & dreaming**
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | false | master switch (wake/sleep loop) |
+| `day_steps`, `wake_frac` | 1000, 0.8 | circadian period; fraction awake |
+| `wake_updates`, `sleep_updates` | 1, 40 | light adaptation while awake; bulk consolidation per night |
+| `prioritized`, `priority_exponent`, `priority_eps` | true, 0.8, 0.02 | salience-weighted ("emotional") replay |
+| `reward_salience`, `surprise_salience` | 1.0, 1.0 | salience = peak |reward| + reward variability |
+| `dream`, `dream_updates` | true, 2 | extra actor-critic imagination passes during sleep |
+
+**`dev` — B3 continual life & critical periods**
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | false | master switch |
+| `continual` | true | truncation only segments memory; only death starts a new life |
+| `critical_period` | true | age-annealed plasticity |
+| `young_gain`, `floor_gain` | 3.0, 0.7 | LR multiplier at birth; mature floor |
+| `critical_period_steps` | 8000 | decay time constant of plasticity |
+
+**`metab` — B4 metabolic cost of cognition & sensorimotor realism**
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | false | master switch |
+| `cognition_cost`, `imagination_energy_cost` | true, 6e-7 | energy debited per imagined step |
+| `bounded_planning`, `min_horizon` | true, 3 | imagination horizon shrinks with low energy |
+| `obs_delay`, `action_delay`, `motor_noise` | 0, 0, 0 | sensory/motor latency and motor noise |
+
+The sparse **k-winners latent** is a model option: `model.sparse_latent`
+(bool) and `model.sparse_frac` (fraction of latent groups allowed to fire).
+
+Extra `metrics.csv` columns when these are on: `weight_energy/thermal/integrity`
+(B1 instantaneous drive weights), `ne_gain`/`da_tone` (B1), `circadian_phase`,
+`asleep`, `sleep_consolidation`, `sleep_probe_loss` (B2), `age`,
+`plasticity_gain`, `lifespan` (B3), `plan_horizon` (B4).
 
 ### `train` — loop and logging
 

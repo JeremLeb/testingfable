@@ -122,7 +122,12 @@ def main():
         cfg.intrinsic.method = args.intrinsic
     if args.shield:
         cfg.shield.enabled = args.shield == "on"
+    return run(cfg)
 
+
+def run(cfg, verbose: bool = True) -> dict:
+    """Train end-to-end from a Config. Returns a summary dict; also writes
+    metrics.csv, an observability plot, rollout GIFs, and a checkpoint."""
     seed = cfg.train.seed
     seed_everything(seed)
     device = "cuda" if (cfg.train.device == "cuda"
@@ -144,17 +149,18 @@ def main():
     shield = build_shield(cfg, env)
     agent = DreamerAgent(wm, ac, device=device, shield=shield)
 
-    print(f"device={device} | wm params "
-          f"{sum(p.numel() for p in wm.parameters())/1e3:.0f}k | "
-          f"intrinsic={cfg.intrinsic.method} | "
-          f"shield={'on' if shield else 'off'}")
+    log = print if verbose else (lambda *a, **k: None)
+    log(f"device={device} | wm params "
+        f"{sum(p.numel() for p in wm.parameters())/1e3:.0f}k | "
+        f"intrinsic={cfg.intrinsic.method} | "
+        f"shield={'on' if shield else 'off'}")
 
     # warmup with random policy to seed the buffer and the world model
-    print(f"warmup: {cfg.train.warmup_steps} random steps")
+    log(f"warmup: {cfg.train.warmup_steps} random steps")
     collect_random(env, buffer, cfg.train.warmup_steps, rng)
 
     base_reward, base_cover = random_baseline(cfg, seed)
-    print(f"random baseline: reward={base_reward:.1f} coverage={base_cover:.1f}")
+    log(f"random baseline: reward={base_reward:.1f} coverage={base_cover:.1f}")
 
     obs, _ = env.reset(seed=seed)
     agent.reset_state()
@@ -204,21 +210,21 @@ def main():
         if step % cfg.train.log_every == 0:
             row = logger.flush(step)
             sps = step / (time.time() - t0)
-            print(f"step {step:6d} | ep_reward {row.get('ep_reward', 0):7.1f} "
-                  f"| wm_loss {row.get('loss', 0):6.2f} "
-                  f"| imag_ret {row.get('imag_return', 0):6.2f} "
-                  f"| entropy {row.get('actor_entropy', 0):5.2f} "
-                  f"| {sps:.0f} steps/s")
+            log(f"step {step:6d} | ep_reward {row.get('ep_reward', 0):7.1f} "
+                f"| wm_loss {row.get('loss', 0):6.2f} "
+                f"| imag_ret {row.get('imag_return', 0):6.2f} "
+                f"| entropy {row.get('actor_entropy', 0):5.2f} "
+                f"| {sps:.0f} steps/s")
 
         if step % cfg.train.eval_every == 0:
             ev = evaluate(agent, cfg, seed)
             ev["baseline_reward"] = base_reward
             ev["baseline_coverage"] = base_cover
             logger.add(**ev)
-            print(f"  [eval] reward {ev['eval_reward']:.1f} "
-                  f"(random {base_reward:.1f}) | food {ev['eval_food']:.1f} "
-                  f"| coverage {ev['eval_coverage']:.1f} "
-                  f"(random {base_cover:.1f})")
+            log(f"  [eval] reward {ev['eval_reward']:.1f} "
+                f"(random {base_reward:.1f}) | food {ev['eval_food']:.1f} "
+                f"| coverage {ev['eval_coverage']:.1f} "
+                f"(random {base_cover:.1f})")
 
         if step % cfg.train.gif_every == 0:
             save_eval_gif(agent, cfg, seed, out / f"rollout_{step}.gif")
@@ -226,11 +232,20 @@ def main():
     torch.save({"wm": wm.state_dict(), "actor": ac.actor.state_dict(),
                 "critic": ac.critic.state_dict()}, out / "checkpoint.pt")
     final = evaluate(agent, cfg, seed, episodes=5)
-    print(f"\nFINAL eval reward {final['eval_reward']:.1f} "
-          f"(random {base_reward:.1f}) | food {final['eval_food']:.1f} "
-          f"| coverage {final['eval_coverage']:.1f} (random {base_cover:.1f})")
+    log(f"\nFINAL eval reward {final['eval_reward']:.1f} "
+        f"(random {base_reward:.1f}) | food {final['eval_food']:.1f} "
+        f"| coverage {final['eval_coverage']:.1f} (random {base_cover:.1f})")
     logger.close()
-    print(f"wrote {out}")
+    try:
+        from .viz.plots import plot_metrics
+        plot_metrics(str(out / "metrics.csv"), str(out / "metrics.png"))
+    except Exception as e:  # plotting is best-effort observability
+        log(f"(plot skipped: {e})")
+    log(f"wrote {out}")
+    return {
+        "final": final, "baseline_reward": base_reward,
+        "baseline_coverage": base_cover, "out_dir": str(out),
+    }
 
 
 if __name__ == "__main__":

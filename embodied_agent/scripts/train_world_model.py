@@ -28,6 +28,9 @@ def main():
     ap.add_argument("--updates", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default="runs/world_model")
+    ap.add_argument("--no-reward", action="store_true",
+                    help="ablate reward/continue heads (substrate test): the "
+                         "model trains on prediction only")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -53,7 +56,7 @@ def main():
     history = []
     for step in range(1, args.updates + 1):
         batch = buffer.sample(cfg.train.batch_size, seq_len, rng)
-        _, metrics = wm.train_step(batch)
+        _, metrics = wm.train_step(batch, use_reward=not args.no_reward)
         if step % 100 == 0 or step == 1:
             eval_batch = buffer.sample(cfg.train.batch_size, seq_len, rng)
             ol = wm.open_loop_error(eval_batch, context)

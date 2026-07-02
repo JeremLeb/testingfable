@@ -116,7 +116,7 @@ class ShieldConfig:
     enabled: bool = True
     # circular no-go zones: list of [cx, cy, radius]; empty -> auto-place one
     forbidden_zones: list = field(default_factory=list)
-    lookahead_steps: int = 3      # kinematic lookahead for the override check
+    lookahead_steps: int = 6      # kinematic lookahead for the override check
     brake_thrust: float = -1.0
 
 

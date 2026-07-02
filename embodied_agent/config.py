@@ -104,7 +104,11 @@ class AgentConfig:
 @dataclass
 class IntrinsicConfig:
     method: str = "rnd"           # "rnd" | "disagreement" | "none"
-    scale: float = 0.05
+    # bonus magnitude; sized to be comparable to the typical per-step
+    # extrinsic (homeostatic) reward so curiosity actually influences the
+    # imagined return during ordinary wandering, while extrinsic spikes
+    # (food/collision) still dominate when something urgent happens
+    scale: float = 0.5
     lr: float = 1e-4
     hidden: int = 64
     out_dim: int = 32

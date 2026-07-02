@@ -137,6 +137,22 @@ acceptable because the substrate is validated first (milestone 4). Returns
 are divided by an EMA of their scale so the entropy coefficient is
 independent of the (large, configurable) reward scale.
 
+## Curiosity ablation (cpu_small, 8k steps, 2 seeds)
+
+| condition | coverage | food | eval reward |
+|---|---|---|---|
+| no curiosity | 13.5 | 0.9 | −81.7 |
+| RND | 15.8 | 1.7 | −105.7 |
+| disagreement | 15.5 | 1.2 | −93.7 |
+
+Removing curiosity reduces exploration coverage and food discovery; the
+bonus costs some extrinsic reward (explore/exploit trade). Be honest about
+the error bars: at this tiny scale the effect is modest and seed variance is
+large — the intrinsic `scale` must be sized comparable to the typical
+per-step extrinsic reward or the bonus is swamped entirely (that constant
+lives in `IntrinsicConfig` with a comment). Longer runs and more seeds
+sharpen the separation.
+
 ## Known hard parts & honest limitations
 
 - **Sample efficiency in a non-resettable body.** A real body cannot be

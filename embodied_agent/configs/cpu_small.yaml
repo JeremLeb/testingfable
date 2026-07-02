@@ -2,8 +2,9 @@
 env:
   arena_size: 16.0
   max_episode_steps: 600
-  n_food: 5
+  n_food: 6
   food_radius: 0.45
+  food_energy: 0.45
   n_obstacles: 2
 model:
   embed_dim: 64
@@ -13,13 +14,13 @@ model:
 agent:
   horizon: 8
 train:
-  total_steps: 12000
-  warmup_steps: 800
+  total_steps: 20000
+  warmup_steps: 1000
   seq_len: 16
-  batch_size: 8
-  train_every: 8
-  log_every: 250
-  eval_every: 3000
-  gif_every: 6000
+  batch_size: 12
+  train_every: 6
+  log_every: 500
+  eval_every: 4000
+  gif_every: 10000
   device: cpu
   out_dir: runs/cpu_small

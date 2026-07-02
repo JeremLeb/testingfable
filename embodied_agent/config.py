@@ -95,7 +95,7 @@ class AgentConfig:
     lam: float = 0.95
     actor_lr: float = 8e-5
     critic_lr: float = 2e-4
-    entropy_scale: float = 3e-4
+    entropy_scale: float = 3e-3   # bonus vs scale-normalized returns
     critic_ema: float = 0.98      # EMA rate for the target critic
     grad_clip: float = 100.0
     expl_noise: float = 0.2       # action noise when collecting real steps

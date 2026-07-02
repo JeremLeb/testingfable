@@ -20,6 +20,7 @@ import torch
 from .agent.actor_critic import ActorCritic
 from .agent.agent import DreamerAgent
 from .agent.collect import collect_random
+from .agent.development import Development
 from .agent.replay import ReplayBuffer
 from .agent.sleep import SleepController
 from .config import load_config
@@ -159,6 +160,12 @@ def run(cfg, verbose: bool = True) -> dict:
     # uniform-replay updates, unchanged).
     sleep_ctl = SleepController(cfg.sleep) if cfg.sleep.enabled else None
 
+    # B3: continual life + age-dependent plasticity (None -> episodic resets,
+    # constant plasticity). `life` tracks the current individual's age.
+    development = Development(cfg.dev) if cfg.dev.enabled else None
+    continual = development is not None and cfg.dev.continual
+    life = {"age": 0, "births": 0}
+
     def gradient_update(prioritized: bool = False, dream: bool = False):
         """One consolidation step: world-model + actor-critic update on a
         replayed sequence, with neuromodulatory LR gating (B1). During sleep,
@@ -179,11 +186,16 @@ def run(cfg, verbose: bool = True) -> dict:
         # world-model LR; |TD error| -> dopamine tone on the actor LR.
         ne_gain = neuromod.update_surprise(wm_metrics["recon"] + wm_metrics["kl"])
         neuromod.update_rpe(ac_metrics["critic_loss"] ** 0.5)
+        # B3: age-dependent plasticity (critical period) scales the LR on top of
+        # the B1 neuromodulatory gain -- high early in life, annealing to a floor.
+        plast = development.plasticity_gain(life["age"]) if development else 1.0
         for g in wm.opt.param_groups:
-            g["lr"] = base_wm_lr * ne_gain
+            g["lr"] = base_wm_lr * ne_gain * plast
         for g in ac.actor_opt.param_groups:
-            g["lr"] = base_actor_lr * neuromod.actor_lr_gain()
+            g["lr"] = base_actor_lr * neuromod.actor_lr_gain() * plast
         logger.add(**wm_metrics, **ac_metrics, **neuromod.metrics())
+        if development is not None:
+            logger.add(**development.metrics(life["age"]))
         return wm_metrics
 
     @torch.no_grad()
@@ -224,6 +236,7 @@ def run(cfg, verbose: bool = True) -> dict:
         buffer.add(obs, action, reward, 0.0 if term else 1.0)
         ep_reward += reward
         ep_len += 1
+        life["age"] += 1
         logger.add(reward=reward, energy=info["energy"], temp=info["temp"],
                    integrity=info["integrity"],
                    drive_energy=info["drive_energy"],
@@ -236,7 +249,23 @@ def run(cfg, verbose: bool = True) -> dict:
         if sleep_ctl is not None:
             logger.add(**sleep_ctl.metrics(step))
 
-        if term or trunc:
+        # B3 continual life: truncation only *segments* stored memory -- the
+        # same individual keeps living (body, recurrent state, age preserved),
+        # so learning is one non-stationary stream. Only death ends a life; a
+        # new individual is then born (age reset). Baseline: any term/trunc
+        # resets the episode as before.
+        if continual and trunc and not term:
+            logger.add(ep_reward=ep_reward, ep_len=ep_len,
+                       interventions=interventions)
+            buffer.end_episode()
+            buffer.start_episode()
+            buffer.add(obs, np.zeros(2), 0.0, 1.0)
+            env.step_count = 0  # restart the truncation clock, keep the body
+            ep_reward, ep_len, interventions = 0.0, 0, 0
+        elif term or trunc:
+            if continual:  # a death: log the completed lifespan, begin anew
+                logger.add(lifespan=life["age"])
+                life["births"] += 1
             logger.add(ep_reward=ep_reward, ep_len=ep_len,
                        interventions=interventions)
             buffer.end_episode()
@@ -245,6 +274,7 @@ def run(cfg, verbose: bool = True) -> dict:
             buffer.start_episode()
             buffer.add(obs, np.zeros(2), 0.0, 1.0)
             ep_reward, ep_len, interventions = 0.0, 0, 0
+            life["age"] = 0
 
         can_train = buffer.can_sample(cfg.train.seq_len)
         if sleep_ctl is None:

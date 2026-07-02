@@ -1,6 +1,7 @@
 """Tests for the biological-plausibility modules (Phase 1)."""
 import numpy as np
 
+from embodied_agent.agent.development import Development
 from embodied_agent.agent.replay import ReplayBuffer
 from embodied_agent.agent.sleep import SleepController
 from embodied_agent.config import load_config
@@ -131,3 +132,46 @@ def test_sleep_disabled_leaves_baseline_sampling_uniform():
     buf = _buffer_with_saliences([0.0, 9.0])
     _, prob = buf.episode_priorities(seq_len=10, sleep_cfg=None)
     assert np.allclose(prob, 0.5)
+
+
+# ------------------------------------------------------------------ B3
+
+def test_plasticity_anneals_with_age():
+    cfg = load_config("cpu_small")
+    cfg.dev.enabled = True
+    cfg.dev.young_gain = 3.0
+    cfg.dev.floor_gain = 0.5
+    cfg.dev.critical_period_steps = 1000
+    dev = Development(cfg.dev)
+    assert abs(dev.plasticity_gain(0) - 3.0) < 1e-6            # young = max
+    assert dev.plasticity_gain(0) > dev.plasticity_gain(1000) \
+        > dev.plasticity_gain(5000)                            # monotone decay
+    assert abs(dev.plasticity_gain(10 ** 6) - 0.5) < 1e-3      # -> floor
+
+
+def test_development_disabled_is_identity():
+    cfg = load_config("cpu_small")
+    cfg.dev.enabled = False
+    dev = Development(cfg.dev)
+    assert dev.plasticity_gain(0) == 1.0
+    assert dev.plasticity_gain(10000) == 1.0
+
+
+def test_continual_life_survives_truncation(tmp_path):
+    # a continual life keeps ageing across episode-truncation boundaries; the
+    # logged age must exceed max_episode_steps, proving the body was not reset.
+    from embodied_agent.train import run
+    import csv
+    cfg = load_config("cpu_small")
+    cfg.dev.enabled = True
+    cfg.env.max_episode_steps = 40
+    cfg.train.total_steps = 200
+    cfg.train.warmup_steps = 40
+    cfg.train.log_every = 40
+    cfg.train.eval_every = 10 ** 9   # skip eval/gif during the test
+    cfg.train.gif_every = 10 ** 9
+    cfg.train.out_dir = str(tmp_path / "life")
+    run(cfg, verbose=False)
+    rows = list(csv.DictReader(open(tmp_path / "life" / "metrics.csv")))
+    ages = [float(r["age"]) for r in rows if r.get("age")]
+    assert max(ages) > cfg.env.max_episode_steps

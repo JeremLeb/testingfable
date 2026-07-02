@@ -199,6 +199,23 @@ class SleepConfig:
 
 
 @dataclass
+class DevelopmentConfig:
+    # B3 -- continual single life, development & critical periods. Off by
+    # default so the baseline (episodic resets, constant plasticity) stands.
+    enabled: bool = False
+    # continual life: truncation no longer wipes the body -- it only segments
+    # memory for replay. Only death (terminated) ends a life; a new individual
+    # then begins (the hook B5 will populate with a fresh genome).
+    continual: bool = True
+    # critical period: plasticity is high at birth and anneals toward a mature
+    # floor with a fixed time constant, so early experience imprints strongly.
+    critical_period: bool = True
+    young_gain: float = 3.0            # LR multiplier at birth (age 0)
+    floor_gain: float = 0.7           # mature plasticity floor
+    critical_period_steps: int = 8000  # decay time constant (steps)
+
+
+@dataclass
 class TrainConfig:
     total_steps: int = 30000
     warmup_steps: int = 1500      # random-policy steps before training starts
@@ -227,6 +244,7 @@ class Config:
     reward: RewardConfig = field(default_factory=RewardConfig)
     neuromod: NeuromodConfig = field(default_factory=NeuromodConfig)
     sleep: SleepConfig = field(default_factory=SleepConfig)
+    dev: DevelopmentConfig = field(default_factory=DevelopmentConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
 
 

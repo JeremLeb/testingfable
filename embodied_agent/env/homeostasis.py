@@ -66,7 +66,36 @@ class Homeostasis:
         return reward, self.dead
 
     def _reward(self, prev_drives: dict[str, float]) -> float:
-        raise NotImplementedError("wired up in milestone 3")
+        """Reward = weighted reduction in distance-from-setpoint (drive
+        reduction), plus a one-off death penalty. Each drive's instantaneous
+        contribution is stored so the logs answer 'which drive is winning'.
+
+        Sign convention: a drive *falling* (moving toward its setpoint) is
+        good, so contribution = w * (prev - curr). Eating raises energy ->
+        energy drive falls -> positive reward. Taking a hit raises the
+        integrity drive -> negative reward.
+        """
+        rc = self.reward_cfg
+        curr = self.drives()
+        weights = {
+            "energy": rc.w_energy,
+            "thermal": rc.w_thermal,
+            "integrity": rc.w_integrity,
+        }
+        terms = {}
+        total = 0.0
+        for name, w in weights.items():
+            delta = (prev_drives[name] - curr[name]) * w * rc.reward_scale
+            terms[f"reward_{name}"] = delta
+            total += delta
+        if self.dead:
+            terms["reward_death"] = -rc.death_penalty
+            total -= rc.death_penalty
+        else:
+            terms["reward_death"] = 0.0
+        terms["reward_total"] = total
+        self.last_reward_terms = terms
+        return total
 
     # ------------------------------------------------------------ logging
 

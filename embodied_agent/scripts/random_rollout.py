@@ -34,6 +34,9 @@ def main():
     print("observation shapes:",
           {k: v.shape for k, v in obs.items()})
     frames, collisions, eaten, deaths = [], 0, 0, 0
+    drive_sums = {"reward_energy": 0.0, "reward_thermal": 0.0,
+                  "reward_integrity": 0.0, "reward_death": 0.0}
+    total_reward = 0.0
     # smoothed random walk so the agent visibly explores instead of jittering
     action = np.zeros(2)
     for t in range(args.steps):
@@ -41,6 +44,9 @@ def main():
         obs, reward, terminated, truncated, info = env.step(action)
         collisions += int(info["collision"])
         eaten += info["food_eaten"]
+        total_reward += reward
+        for k in drive_sums:
+            drive_sums[k] += info.get(k, 0.0)
         if t % args.render_every == 0:
             frames.append(renderer.render(info))
         if terminated or truncated:
@@ -52,6 +58,8 @@ def main():
     renderer.close()
     print(f"steps={args.steps} collisions={collisions} "
           f"food_eaten={eaten} deaths={deaths}")
+    print(f"total reward={total_reward:.2f} drive decomposition="
+          + ", ".join(f"{k[7:]}={v:.1f}" for k, v in drive_sums.items()))
     print(f"final intero: energy={info.get('energy', float('nan')):.3f} "
           f"temp={info.get('temp', float('nan')):.3f} "
           f"integrity={info.get('integrity', float('nan')):.3f}")

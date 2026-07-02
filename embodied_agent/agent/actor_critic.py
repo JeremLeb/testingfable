@@ -29,15 +29,21 @@ from ..model.rssm import RSSM, RSSMState
 
 class Actor(nn.Module):
     def __init__(self, feat_dim: int, action_dim: int, hidden: int,
-                 min_std: float = 0.15, max_std: float = 1.0):
+                 min_std: float = 0.15, max_std: float = 1.0,
+                 action_bias=None):
         super().__init__()
         self.net = mlp(feat_dim, hidden, 2 * action_dim, layers=3)
         self.action_dim = action_dim
         self.min_std, self.max_std = min_std, max_std
+        # B5 innate behavioural prior: a fixed offset on the pre-tanh mean, so
+        # a freshly-initialised (unlearned) actor already has an instinct.
+        bias = action_bias if action_bias is not None else [0.0] * action_dim
+        self.register_buffer("action_bias",
+                             torch.tensor(bias, dtype=torch.float32))
 
     def _dist(self, feat):
         mean, std = torch.chunk(self.net(feat), 2, dim=-1)
-        mean = torch.tanh(mean)
+        mean = torch.tanh(mean + self.action_bias)
         std = self.min_std + (self.max_std - self.min_std) * torch.sigmoid(std)
         return mean, std
 
@@ -98,7 +104,8 @@ class ActorCritic:
         self.wm = world_model
         self.intrinsic = intrinsic
         feat = rssm.feat_dim
-        self.actor = Actor(feat, action_dim, cfg.model.hidden)
+        self.actor = Actor(feat, action_dim, cfg.model.hidden,
+                           action_bias=cfg.agent.action_bias)
         self.critic = Critic(feat, cfg.model.hidden)
         self.target_critic = Critic(feat, cfg.model.hidden)
         self.target_critic.load_state_dict(self.critic.state_dict())

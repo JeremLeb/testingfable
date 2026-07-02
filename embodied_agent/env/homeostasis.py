@@ -19,10 +19,12 @@ from .neuromod import allostatic_weights
 
 
 class Homeostasis:
-    def __init__(self, cfg: EnvConfig, reward_cfg=None, neuromod_cfg=None):
+    def __init__(self, cfg: EnvConfig, reward_cfg=None, neuromod_cfg=None,
+                 evo_cfg=None):
         self.cfg = cfg
         self.reward_cfg = reward_cfg
         self.neuromod_cfg = neuromod_cfg
+        self.evo_cfg = evo_cfg
         self.reset()
 
     def reset(self):
@@ -30,7 +32,26 @@ class Homeostasis:
         self.temp = self.cfg.temp_setpoint
         self.integrity = 1.0
         self.dead = False
+        self.repro_readiness = 0.0   # B5 reproductive drive accumulator
+        self.offspring = 0
         self.last_reward_terms: dict[str, float] = {}
+
+    def _update_reproduction(self):
+        """B5: sustained energy surplus accrues reproductive readiness; crossing
+        the threshold bears one offspring (paid for in energy). No-op unless the
+        evolution reproduction drive is enabled."""
+        evo = self.evo_cfg
+        if not (evo is not None and evo.reproduction):
+            return 0
+        born = 0
+        if self.energy >= evo.repro_energy_threshold:
+            self.repro_readiness += evo.repro_rate
+        if self.repro_readiness >= 1.0 and self.energy > evo.repro_cost:
+            self.repro_readiness -= 1.0
+            self.energy = float(np.clip(self.energy - evo.repro_cost, 0.0, 1.0))
+            self.offspring += 1
+            born = 1
+        return born
 
     # ------------------------------------------------------------ drives
 
@@ -71,6 +92,7 @@ class Homeostasis:
         self.integrity = float(np.clip(self.integrity, 0.0, 1.0))
 
         self.dead = self.energy <= 0.0 or self.integrity <= 0.0
+        self.last_born = self._update_reproduction()
         reward = self._reward(prev_drives) if self.reward_cfg else 0.0
         return reward, self.dead
 
@@ -117,6 +139,8 @@ class Homeostasis:
             "integrity": self.integrity, "dead": self.dead,
             "drive_energy": d["energy"], "drive_thermal": d["thermal"],
             "drive_integrity": d["integrity"],
+            "offspring": self.offspring,
+            "repro_readiness": self.repro_readiness,
         }
         out.update(self.last_reward_terms)
         return out

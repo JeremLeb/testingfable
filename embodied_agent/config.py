@@ -119,6 +119,9 @@ class AgentConfig:
     critic_ema: float = 0.98      # EMA rate for the target critic
     grad_clip: float = 100.0
     expl_noise: float = 0.2       # action noise when collecting real steps
+    # B5 innate action bias (a heritable behavioural prior): added to the
+    # actor's pre-tanh mean, so a newborn acts on instinct before it learns.
+    action_bias: list = field(default_factory=lambda: [0.0, 0.0])
 
 
 @dataclass
@@ -239,6 +242,26 @@ class MetabolismConfig:
 
 
 @dataclass
+class EvolutionConfig:
+    # B5 -- evolutionary outer loop & reproduction. Off by default (a single
+    # lifetime is the baseline); the evolution loop is opt-in via scripts.
+    enabled: bool = False
+    population: int = 8
+    generations: int = 6
+    elite_frac: float = 0.25      # top fraction copied forward unmutated
+    tournament: int = 3           # tournament size for parent selection
+    mutation_rate: float = 0.15   # gene std as a fraction of its range
+    mutation_prob: float = 0.9    # per-gene chance of mutating
+    life_steps: int = 1500        # env steps per fitness evaluation (full life)
+    # reproduction as a homeostatic drive: sustained energy surplus accrues
+    # reproductive readiness; crossing the threshold spawns an offspring.
+    reproduction: bool = False
+    repro_energy_threshold: float = 0.7   # energy above which readiness accrues
+    repro_rate: float = 0.002             # readiness gained per surplus step
+    repro_cost: float = 0.25              # energy spent bearing one offspring
+
+
+@dataclass
 class TrainConfig:
     total_steps: int = 30000
     warmup_steps: int = 1500      # random-policy steps before training starts
@@ -269,6 +292,7 @@ class Config:
     sleep: SleepConfig = field(default_factory=SleepConfig)
     dev: DevelopmentConfig = field(default_factory=DevelopmentConfig)
     metab: MetabolismConfig = field(default_factory=MetabolismConfig)
+    evolution: EvolutionConfig = field(default_factory=EvolutionConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
 
 

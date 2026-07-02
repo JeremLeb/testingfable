@@ -374,6 +374,23 @@ def run(cfg, verbose: bool = True) -> dict:
     return {
         "final": final, "baseline_reward": base_reward,
         "baseline_coverage": base_cover, "out_dir": str(out),
+        "births": life["births"], "offspring": int(env.homeostasis.offspring),
+    }
+
+
+def live_one_life(cfg, verbose: bool = False) -> dict:
+    """Run one individual's whole life (B1-B4 lifetime learning included) and
+    return its *endogenous* fitness -- what the body achieved, not a designed
+    objective. Used as the full-life fitness for the B5 evolutionary loop.
+
+    `cfg.train.total_steps` sets the lifespan budget; the phenotype (setpoints,
+    morphology, instinct, plasticity) comes from the genome via to_config."""
+    summary = run(cfg, verbose=verbose)
+    f = summary["final"]
+    return {
+        "fitness": f["eval_reward"] + 8.0 * summary["offspring"],
+        "reward": f["eval_reward"], "lifespan": f["eval_length"],
+        "food": f["eval_food"], "offspring": summary["offspring"],
     }
 
 

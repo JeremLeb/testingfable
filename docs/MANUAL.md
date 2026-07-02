@@ -210,7 +210,8 @@ python -m embodied_agent.scripts.neuromod_demo --config cpu_small       # B1
 python -m embodied_agent.scripts.sleep_demo --config cpu_small          # B2
 python -m embodied_agent.scripts.development_demo --config cpu_small     # B3
 python -m embodied_agent.scripts.metabolism_demo --config cpu_small      # B4
-python -m embodied_agent.train --config cpu_bio                          # all on
+python -m embodied_agent.train --config cpu_bio                          # Phase 1 on
+python -m embodied_agent.scripts.evolution_demo --config cpu_small       # B5 (Phase 2)
 ```
 
 ### 4.10 Tests
@@ -225,10 +226,12 @@ reward-decomposition consistency, seed determinism), geometry, sensor
 ranges/rates, replay buffer, world-model loss decrease, λ-return math,
 actor-critic step, shield blocking, the Tier-1 upgrades (symlog/two-hot,
 discrete straight-through latents, the CNN retina path, AUC + latent probe),
-the Phase-1 biological modules (`tests/test_bio.py`: allostatic weighting,
+the biological modules (`tests/test_bio.py`: allostatic weighting,
 prioritized-replay ordering, wake/sleep phase, plasticity annealing, continual
-life across truncation, bounded planning, sensorimotor delay, sparse latent),
-and end-to-end training smoke tests (incl. the pixel retina).
+life across truncation, bounded planning, sensorimotor delay, sparse latent,
+and the B5 genome/mutation/crossover, action-bias instinct, fitness adaptation
+in a harsh arena, and the reproduction drive), and end-to-end training smoke
+tests (incl. the pixel retina).
 
 ## 5. Configuration reference
 
@@ -415,6 +418,27 @@ All four groups are **off by default** so the deep-RL baseline is preserved;
 
 The sparse **k-winners latent** is a model option: `model.sparse_latent`
 (bool) and `model.sparse_frac` (fraction of latent groups allowed to fire).
+
+**`evolution` — B5 evolutionary outer loop & reproduction**
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | false | (single lifetime is the baseline; the loop is script-driven) |
+| `population`, `generations` | 8, 6 | population size; generations to run |
+| `elite_frac`, `tournament` | 0.25, 3 | elitism fraction; tournament size |
+| `mutation_rate`, `mutation_prob` | 0.15, 0.9 | gene std (frac of range); per-gene chance |
+| `life_steps` | 1500 | env steps per full-life fitness evaluation |
+| `reproduction` | false | reproduction as a homeostatic drive |
+| `repro_energy_threshold`, `repro_rate`, `repro_cost` | 0.7, 0.002, 0.25 | surplus threshold; readiness/step; energy per offspring |
+
+The heritable **genome** (`evolution/genome.py`) sets innate `temp_setpoint`,
+base drive weights, sensor morphology (`n_rays`, `fov_deg`), early plasticity
+(`young_gain`), and an innate `action_bias`; `Genome.to_config` expresses it
+onto a `Config`. `Population` (`evolution/population.py`) runs selection +
+mutation; `innate_fitness` scores instinct-only survival, while
+`train.live_one_life` scores a full life with lifetime learning. When
+reproduction is on, `metrics.csv` / `info` carry `offspring` and
+`repro_readiness`.
 
 Extra `metrics.csv` columns when these are on: `weight_energy/thermal/integrity`
 (B1 instantaneous drive weights), `ne_gain`/`da_tone` (B1), `circadian_phase`,

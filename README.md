@@ -233,6 +233,34 @@ weights (survival); salience-prioritized vs uniform replay (consolidation of
 salient memories); critical-period vs constant plasticity (early-experience
 imprinting); energy-bounded vs free planning (planning depth vs energy).
 
+### Phase 2 — the evolutionary outer loop (B5)
+
+Phase 1 is a single lifetime. **B5** adds the loop *above* the lifetime: a
+population of individuals whose **genome** — innate homeostatic set-points and
+base drive weights, sensor morphology (`n_rays`, `fov_deg`), an innate
+`action_bias` instinct, and early plasticity — is set by evolution, expressed
+onto a `Config`, then tuned by lifetime learning (B1–B4). Fitness is
+**endogenous** (how long the body survives, how much it eats, how many
+offspring it bears — reproduction is a homeostatic drive, `evolution.
+reproduction`), not a designed objective. Longer-lived genomes leave more
+mutated descendants.
+
+```bash
+python -m embodied_agent.scripts.evolution_demo --config cpu_small     # ~25s
+```
+
+![evolutionary outer loop](docs/assets/evolution_demo.png)
+
+Two results: in a cold, food-scarce arena the **innate priors adapt** —
+population fitness rises and the innate thermal set-point slides toward the cold
+world's optimum over generations (left). And a **Baldwin effect** (right): when
+a trait can be both learned within a life and inherited, evolution moves its
+*innate* component toward the adaptive value, so each generation needs less
+learning to reach competence — a learned behaviour becomes innate. The genome →
+phenotype → fitness → selection machinery lives in `evolution/` (`Genome`,
+`Population`); `train.live_one_life()` provides the full-life fitness that also
+runs lifetime learning.
+
 ## Arbitration (which drive is winning)
 
 Reward is an explicit weighted sum of energy, thermal, and integrity drive
@@ -306,19 +334,20 @@ sharpen the separation.
 
 ```
 embodied_agent/
-  env/         arena, sensors, homeostasis, geometry, neuromod (B1)
+  env/         arena, sensors, homeostasis (+ reproduction, B5), neuromod (B1)
   model/       encoders/decoders, rssm (sparse latent, B4), world model + heads
-  agent/       actor-critic, imagination, replay (salience, B2), online agent,
-               sleep (B2), development (B3), metabolism (B4)
+  agent/       actor-critic (+ action_bias, B5), imagination, replay (salience,
+               B2), online agent, sleep (B2), development (B3), metabolism (B4)
+  evolution/   genome, population + selection/mutation (B5)
   intrinsic/   RND, ensemble disagreement
   safety/      hard-constraint shield
   configs/     cpu_small.yaml, cpu_pixels.yaml, cpu_bio.yaml, gpu_default.yaml
   viz/         arena renderer, metrics plots
   scripts/     random_rollout, train_world_model, ablation, shield_demo,
                fear_analysis, neuromod_demo, sleep_demo, development_demo,
-               metabolism_demo
+               metabolism_demo, evolution_demo
   tests/       env, sensors, replay, model, shield, advanced, bio, smoke
-  train.py     end-to-end training (run(cfg)); wake/sleep + continual life
+  train.py     training (run(cfg)); wake/sleep, continual life, live_one_life
   evaluate.py  load a checkpoint and report vs random
 ```
 

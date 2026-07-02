@@ -268,3 +268,95 @@ def test_sparse_latent_fires_fewer_groups():
         z = post.z.reshape(*post.z.shape[:-1], wm.rssm.groups, wm.rssm.classes)
         frac = float((z.abs().amax(-1) > 0).float().mean())
     assert abs(frac - 0.5) < 0.1  # ~half the groups fire
+
+
+# ------------------------------------------------------------------ B5
+
+def test_genome_random_within_bounds_and_expresses():
+    from embodied_agent.evolution import Genome, GENE_BOUNDS
+    g = Genome.random(np.random.default_rng(0))
+    for name, (lo, hi, is_int) in GENE_BOUNDS.items():
+        assert lo <= g.genes[name] <= hi
+        if is_int:
+            assert float(g.genes[name]).is_integer()
+    cfg = g.to_config(load_config("cpu_small"))
+    assert cfg.sensor.n_rays == int(g.genes["n_rays"])
+    assert cfg.env.temp_setpoint == g.genes["temp_setpoint"]
+    assert cfg.agent.action_bias == [g.genes["action_bias_thrust"],
+                                     g.genes["action_bias_turn"]]
+
+
+def test_genome_mutation_stays_in_bounds():
+    from embodied_agent.evolution import Genome, GENE_BOUNDS
+    rng = np.random.default_rng(1)
+    g = Genome.random(rng)
+    for _ in range(50):
+        g = g.mutate(rng, rate=0.5, prob=1.0)
+    for name, (lo, hi, _) in GENE_BOUNDS.items():
+        assert lo <= g.genes[name] <= hi
+
+
+def test_crossover_inherits_from_parents():
+    from embodied_agent.evolution import Genome, GENE_BOUNDS
+    rng = np.random.default_rng(2)
+    a, b = Genome.random(rng), Genome.random(rng)
+    c = Genome.crossover(a, b, rng)
+    for name in GENE_BOUNDS:
+        assert c.genes[name] in (a.genes[name], b.genes[name])
+
+
+def test_action_bias_shifts_newborn_behaviour():
+    import torch
+    from embodied_agent.agent.actor_critic import Actor
+    torch.manual_seed(0)
+    unbiased = Actor(8, 2, 16, action_bias=[0.0, 0.0])
+    torch.manual_seed(0)
+    forward = Actor(8, 2, 16, action_bias=[3.0, 0.0])
+    feat = torch.zeros(1, 8)
+    m0 = unbiased.act(feat, deterministic=True)
+    m1 = forward.act(feat, deterministic=True)
+    assert m1[0, 0] > m0[0, 0]  # innate forward instinct, before any learning
+
+
+def test_evolution_improves_fitness_in_harsh_arena():
+    from embodied_agent.evolution import Population, innate_fitness
+    cfg = load_config("cpu_small")
+    e = cfg.env
+    e.fixed_layout = True
+    e.n_hot, e.n_cold, e.temp_amp, e.temp_sigma_frac = 0, 4, 0.5, 0.35
+    e.temp_danger, e.temp_damage_rate = 0.2, 0.02
+    e.n_food, e.base_metabolism = 4, 0.0015
+    e.max_episode_steps = 100000
+    cfg.evolution.population = 8
+    cfg.evolution.generations = 5
+    pop = Population(cfg.evolution, cfg, seed=3)
+    hist = pop.evolve(lambda g, s: innate_fitness(g.to_config(cfg), s, 800))
+    assert len(hist) == 5
+    assert hist[-1]["fitness_mean"] > hist[0]["fitness_mean"]      # adapts
+    # cold arena selects a lower innate thermal set-point
+    assert hist[-1]["gene_mean"]["temp_setpoint"] < \
+        hist[0]["gene_mean"]["temp_setpoint"]
+
+
+def test_reproduction_drive_bears_offspring_when_enabled():
+    cfg = load_config("cpu_small")
+    cfg.evolution.reproduction = True
+    cfg.evolution.repro_energy_threshold = 0.0
+    cfg.evolution.repro_rate = 0.6
+    cfg.evolution.repro_cost = 0.1
+    env = make_env(cfg, seed=0)
+    env.reset(seed=0)
+    info = {}
+    for _ in range(6):
+        _, _, _, _, info = env.step(np.zeros(2))
+    assert info["offspring"] >= 1
+
+
+def test_reproduction_disabled_bears_none():
+    cfg = load_config("cpu_small")
+    cfg.evolution.reproduction = False
+    env = make_env(cfg, seed=0)
+    env.reset(seed=0)
+    for _ in range(6):
+        _, _, _, _, info = env.step(np.zeros(2))
+    assert info["offspring"] == 0

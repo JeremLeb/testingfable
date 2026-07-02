@@ -3,6 +3,7 @@ env:
   arena_size: 16.0
   max_episode_steps: 600
   n_food: 5
+  food_radius: 0.45
   n_obstacles: 2
 model:
   embed_dim: 64

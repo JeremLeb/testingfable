@@ -1,0 +1,70 @@
+# GPU preset tuned for a laptop RTX 4060 Ti (8 GB) -- the recommended way to
+# watch the full "living" agent train at a comfortable speed. Biological stack
+# (B1-B4) is ON, the model is a few hundred k params (tiny for 8 GB), and it
+# uses the fast ray vision so the live GUI stays smooth. `device: cuda`
+# auto-falls back to CPU if no GPU is found, so this preset always runs.
+#
+#   python -m embodied_agent.gui                      # GUI, pick "GPU (biological)"
+#   python -m embodied_agent.train --config gpu_laptop
+#
+# For the heavy pixel-retina stack on a desktop GPU, see gpu_default.yaml.
+env:
+  arena_size: 20.0
+  max_episode_steps: 1000
+  n_food: 8
+  food_energy: 0.4
+  n_obstacles: 3
+sensor:
+  vision_mode: rays
+  n_rays: 16
+model:
+  embed_dim: 256
+  deter_dim: 512
+  hidden: 256
+  latent_kind: discrete
+  latent_groups: 32
+  latent_classes: 32
+  reward_head: twohot
+  reward_bins: 51
+  sparse_latent: true          # B4 sparse cortical code (keep 24/32 groups)
+  sparse_frac: 0.75
+agent:
+  horizon: 15
+# --- biological stack on (same switches cpu_bio uses, larger model) ---
+neuromod:
+  enabled: true
+sleep:
+  enabled: true
+  day_steps: 1000
+  wake_frac: 0.8
+  sleep_updates: 60
+  prioritized: true
+  dream: true
+dev:
+  enabled: true
+  continual: true
+  critical_period: true
+  young_gain: 3.0
+  floor_gain: 0.7
+  critical_period_steps: 20000
+metab:
+  enabled: true
+  cognition_cost: true
+  bounded_planning: true
+  min_horizon: 4
+  obs_delay: 1
+  motor_noise: 0.02
+train:
+  total_steps: 300000
+  warmup_steps: 3000
+  seq_len: 48
+  batch_size: 48
+  train_every: 4
+  updates_per_train: 1
+  log_every: 1000
+  eval_every: 20000
+  gif_every: 100000
+  gui_every: 4
+  buffer_capacity: 400000
+  device: cuda
+  out_dir: runs/gpu_laptop

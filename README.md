@@ -9,7 +9,28 @@ self-labeling because the agent's actions change its senses in predictable
 ways and the senses cross-predict one another.
 
 Runs on a laptop CPU in the `cpu_small` preset and shows visible learning in
-minutes; scales up with `gpu_default`.
+minutes; scales up on a laptop GPU (`gpu_laptop`, tuned for an RTX 4060 Ti) or a
+desktop GPU (`gpu_default`).
+
+## 🚀 Watch it live (no coding)
+
+Install once, then open a browser dashboard and watch the creature forage,
+sleep, and learn in real time. Full walkthrough: **[QUICKSTART.md](QUICKSTART.md)**.
+
+```bash
+# Windows: double-click install.bat, then run.bat
+bash install.sh      # once (add --cpu if you have no NVIDIA GPU)
+bash run.sh          # opens http://localhost:8000 in your browser
+```
+
+![live dashboard](docs/assets/dashboard.png)
+
+Pick a scenario (GPU biological / CPU biological / CPU baseline), toggle the
+biological switches, press **Start**, and watch the arena, the body's
+energy/temperature/integrity, the falling world-model prediction error, and a
+plain-language readout of what it's doing. `python -m embodied_agent.doctor`
+checks your machine and GPU; `python -m embodied_agent.gui` launches the
+dashboard directly.
 
 **Full operating manual** — every command, flag, config key, output column,
 extension point, and troubleshooting table: [docs/MANUAL.md](docs/MANUAL.md).

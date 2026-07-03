@@ -48,6 +48,15 @@ Everything is headless-safe (matplotlib Agg backend); no display is needed.
 
 ## 3. Quickstart (5 minutes on a laptop CPU)
 
+**No-code path:** run the installer (`install.sh` / `install.bat`), then the
+launcher (`run.sh` / `run.bat`) to open the live dashboard at
+http://localhost:8000. `python -m embodied_agent.doctor` reports your Python,
+packages, and GPU; `python -m embodied_agent.gui` launches the dashboard
+directly (`--port`, `--host`, `--no-browser` flags). See
+[QUICKSTART.md](../QUICKSTART.md).
+
+**Command-line path:**
+
 ```bash
 # 1. sanity: watch a random agent wander (writes a GIF)
 python -m embodied_agent.scripts.random_rollout --config cpu_small
@@ -256,7 +265,9 @@ the pixel retina).
 Presets live in `embodied_agent/configs/`: `cpu_small.yaml` (fast, discrete
 latents + two-hot reward + ray vision), `cpu_pixels.yaml` (CPU smoke of the
 pixel retina + CNN), `cpu_bio.yaml` (cpu_small with all Phase-1 biological
-mechanisms on), and `gpu_default.yaml` (full advanced stack). A YAML
+mechanisms on), `gpu_laptop.yaml` (biological stack, mid-size model, tuned for
+a laptop RTX 4060 Ti / 8 GB — `device: cuda` auto-falls back to CPU), and
+`gpu_default.yaml` (full pixel-retina stack for a desktop GPU). A YAML
 preset overrides the dataclass defaults in `embodied_agent/config.py`;
 unknown keys raise an error. Pass either a preset name or a YAML path to
 `--config`. Rates are **per step** unless noted; the arena uses abstract

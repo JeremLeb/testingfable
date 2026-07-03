@@ -136,9 +136,14 @@ def main():
     return run(cfg)
 
 
-def run(cfg, verbose: bool = True) -> dict:
+def run(cfg, verbose: bool = True, on_step=None, should_stop=None) -> dict:
     """Train end-to-end from a Config. Returns a summary dict; also writes
-    metrics.csv, an observability plot, rollout GIFs, and a checkpoint."""
+    metrics.csv, an observability plot, rollout GIFs, and a checkpoint.
+
+    on_step(state): optional callback invoked every ``cfg.train.gui_every``
+        steps with a live-state dict (step, info, env, metrics, eval, phase) --
+        used by the observation GUI. should_stop(): optional predicate; when it
+        returns True the run halts early and still finalises cleanly."""
     seed = cfg.train.seed
     seed_everything(seed)
     device = "cuda" if (cfg.train.device == "cuda"
@@ -248,8 +253,12 @@ def run(cfg, verbose: bool = True) -> dict:
     buffer.add(obs, np.zeros(2), 0.0, 1.0)
     ep_reward, ep_len, interventions = 0.0, 0, 0
     t0 = time.time()
+    live = {"metrics": {}, "eval": {}}  # latest values for the observation GUI
+    gui_every = cfg.train.gui_every or 10
 
     for step in range(1, cfg.train.total_steps + 1):
+        if should_stop is not None and should_stop():
+            log("stop requested"); break
         awake = sleep_ctl is None or sleep_ctl.is_awake(step)
         # B4: the agent acts on a (possibly delayed) perception, and the world
         # receives a (possibly delayed, noisy) action.
@@ -264,6 +273,10 @@ def run(cfg, verbose: bool = True) -> dict:
         obs, reward, term, trunc, info = env.step(motor)
         buffer.add(obs, motor, reward, 0.0 if term else 1.0)
         body["energy"] = info["energy"]
+        if on_step is not None and step % gui_every == 0:
+            on_step({"step": step, "info": info, "env": env,
+                     "metrics": live["metrics"], "eval": live["eval"],
+                     "asleep": not awake, "sps": step / (time.time() - t0)})
         ep_reward += reward
         ep_len += 1
         life["age"] += 1
@@ -338,6 +351,7 @@ def run(cfg, verbose: bool = True) -> dict:
 
         if step % cfg.train.log_every == 0:
             row = logger.flush(step)
+            live["metrics"] = row
             sps = step / (time.time() - t0)
             log(f"step {step:6d} | ep_reward {row.get('ep_reward', 0):7.1f} "
                 f"| wm_loss {row.get('loss', 0):6.2f} "
@@ -349,6 +363,7 @@ def run(cfg, verbose: bool = True) -> dict:
             ev = evaluate(agent, cfg, seed)
             ev["baseline_reward"] = base_reward
             ev["baseline_coverage"] = base_cover
+            live["eval"] = ev
             logger.add(**ev)
             log(f"  [eval] reward {ev['eval_reward']:.1f} "
                 f"(random {base_reward:.1f}) | food {ev['eval_food']:.1f} "

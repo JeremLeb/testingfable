@@ -2,3 +2,5 @@ runs/
 __pycache__/
 *.pyc
 .pytest_cache/
+.venv/
+embodied_agent/gui/__pycache__/

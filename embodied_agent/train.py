@@ -280,8 +280,9 @@ def run(cfg, verbose: bool = True, on_step=None, should_stop=None) -> dict:
         body["energy"] = info["energy"]
         if on_step is not None and step % gui_every == 0:
             on_step({"step": step, "info": info, "env": env, "obs": obs,
-                     "metrics": live["metrics"], "eval": live["eval"],
-                     "asleep": not awake, "sps": step / (time.time() - t0)})
+                     "agent": agent, "metrics": live["metrics"],
+                     "eval": live["eval"], "asleep": not awake,
+                     "sps": step / (time.time() - t0)})
         ep_reward += reward
         ep_len += 1
         life["age"] += 1

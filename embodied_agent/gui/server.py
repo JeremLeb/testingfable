@@ -61,6 +61,7 @@ class GuiState:
         self.colony_mode = False
         self.frame_png = _placeholder_png()
         self.senses_png = _placeholder_png()
+        self.predict_png = _placeholder_png()
         self.renderer = None
         self.senses_renderer = None
         self.sensor_cfg = None
@@ -175,6 +176,9 @@ class GuiState:
         if now - self._last_frame_t > 0.1:
             self._render(s["env"], info)
             self._render_senses(s.get("obs"))
+            ag = s.get("agent")
+            if ag is not None:
+                self._render_predict(self._predict_next_obs(ag, ag.wm))
             self._last_frame_t = now
         # history: one point every ~0.3 s, capped
         if now - self._last_hist_t > 0.3:
@@ -249,6 +253,9 @@ class GuiState:
             self._render_colony(env, foc.id if foc else None)
             if foc is not None:
                 self._render_senses(foc.observe())
+                if foc.mind is not None:            # its mind's-eye prediction
+                    self._render_predict(
+                        self._predict_next_obs(foc.agent, foc.mind.wm))
             with self.lock:
                 self._snap = {"S": env.cfg.arena_size,
                               "pts": [(c.id, float(c.pos[0]), float(c.pos[1]))
@@ -300,6 +307,34 @@ class GuiState:
             png = self.senses_renderer.png(obs)
             with self.lock:
                 self.senses_png = png
+        except Exception:
+            traceback.print_exc()
+
+    def _predict_next_obs(self, agent, wm):
+        """The world model's prediction of the NEXT observation from the agent's
+        current recurrent state + last action -- its 'mind's eye' / imagination.
+        One prior (open-loop) RSSM step decoded back to observation space."""
+        try:
+            import torch
+            if agent is None or wm is None or getattr(agent, "_state", None) is None:
+                return None
+            with torch.no_grad():
+                nxt = wm.rssm.prior_step(agent._state, agent._prev_action)
+                recon = wm.decoder(nxt.feat())
+            return {k: np.asarray(v[0].detach().cpu()) for k, v in recon.items()}
+        except Exception:
+            traceback.print_exc()
+            return None
+
+    def _render_predict(self, obs):
+        """Render a predicted observation with the (already-built) senses
+        renderer -- 'what it expects to see next'."""
+        try:
+            if obs is None or self.senses_renderer is None:
+                return
+            png = self.senses_renderer.png(obs)
+            with self.lock:
+                self.predict_png = png
         except Exception:
             traceback.print_exc()
 
@@ -363,6 +398,10 @@ class GuiState:
         with self.lock:
             return self.senses_png
 
+    def predict_bytes(self) -> bytes:
+        with self.lock:
+            return self.predict_png
+
 
 STATE = GuiState()
 
@@ -404,6 +443,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, STATE.frame_bytes(), "image/png")
         elif path == "/api/senses.png":
             self._send(200, STATE.senses_bytes(), "image/png")
+        elif path == "/api/predict.png":
+            self._send(200, STATE.predict_bytes(), "image/png")
         elif path == "/favicon.ico":
             self._send(204, b"", "image/x-icon")
         else:

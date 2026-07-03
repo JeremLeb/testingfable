@@ -51,6 +51,28 @@ def test_senses_renderer_draws_rays_and_retina():
     assert png2[:8] == b"\x89PNG\r\n\x1a\n"
 
 
+def test_mindseye_prediction_produces_renderable_obs():
+    from embodied_agent.colony.world import ColonyEnv
+    from embodied_agent.colony.run import Mind
+    from embodied_agent.agent.agent import DreamerAgent
+    from embodied_agent.gui.server import GuiState
+    from embodied_agent.gui.senses import SensesRenderer
+    cfg = load_config("colony")
+    cfg.model.deter_dim = cfg.model.hidden = cfg.model.embed_dim = 64
+    cfg.model.latent_groups = cfg.model.latent_classes = 8
+    cfg.colony.n_init = 2
+    env = ColonyEnv(cfg, seed=0); env.reset()
+    c = env.living[0]
+    mind = Mind(cfg, c.sensors.spaces, "cpu")
+    c.mind, c.agent = mind, DreamerAgent(mind.wm, mind.ac, "cpu")
+    c.agent.act(c.observe())                       # populate recurrent state
+    gs = GuiState(); gs.sensor_cfg = cfg.sensor
+    pred = gs._predict_next_obs(c.agent, c.mind.wm)
+    assert set(pred) == set(c.sensors.spaces)       # predicts every modality
+    png = SensesRenderer(cfg.sensor).png(pred)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+
+
 def test_focus_click_selects_nearest_creature():
     from embodied_agent.gui.server import GuiState
     gs = GuiState()

@@ -121,10 +121,18 @@ PAGE = r"""<!doctype html>
 
   <div class="card" style="margin-top:16px">
     <h3 id="sensesTitle">👁 What it senses (first person)</h3>
-    <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
-      <img id="senses" src="/api/senses.png" alt="senses"
-           style="width:280px;height:280px;border-radius:10px;background:#0e1116">
-      <div class="sub" id="sensesHint" style="max-width:460px"></div>
+    <div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">
+      <div style="text-align:center">
+        <div class="ctitle">what it senses now</div>
+        <img id="senses" src="/api/senses.png" alt="senses"
+             style="width:250px;height:250px;border-radius:10px;background:#0e1116">
+      </div>
+      <div style="text-align:center">
+        <div class="ctitle">🧠 its mind’s eye — what it expects next</div>
+        <img id="predict" src="/api/predict.png" alt="prediction"
+             style="width:250px;height:250px;border-radius:10px;background:#0e1116">
+      </div>
+      <div class="sub" id="sensesHint" style="max-width:340px"></div>
     </div>
   </div>
 
@@ -198,11 +206,14 @@ async function poll(){
     const t=Date.now();
     $('arena').src='/api/frame.png?t='+t;
     $('senses').src='/api/senses.png?t='+t;
+    $('predict').src='/api/predict.png?t='+t;
   }
   // "what it sees" hint
   const legend='The fan is its <b>vision</b> (green = food, grey = wall), the '+
     'purple arrow is <b>smell</b>, red arcs are <b>touch</b>, and the corner '+
-    'bars are its <b>body</b> (energy / temperature / health).';
+    'bars are its <b>body</b> (energy / temperature / health). The second '+
+    'panel is its <b>world model’s prediction</b> of the next moment — its '+
+    'imagination. As it learns, the prediction should start matching reality.';
   if(colony){
     $('arena').style.cursor='crosshair';
     const f=st.focus;

@@ -118,6 +118,15 @@ PAGE = r"""<!doctype html>
     </div>
   </div>
 
+  <div class="card" style="margin-top:16px">
+    <h3 id="sensesTitle">👁 What it senses (first person)</h3>
+    <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
+      <img id="senses" src="/api/senses.png" alt="senses"
+           style="width:280px;height:280px;border-radius:10px;background:#0e1116">
+      <div class="sub" id="sensesHint" style="max-width:460px"></div>
+    </div>
+  </div>
+
   <div class="charts">
     <div class="card"><div class="ctitle" id="t_reward">Reward over time</div>
       <canvas id="c_reward"></canvas></div>
@@ -182,7 +191,25 @@ async function poll(){
   drawChart($('c_reward'),h.reward,colony?'#39d98a':'#4c8dff');
   drawChart($('c_wm'),h.wm_loss,'#ffab4c');
   drawChart($('c_energy'),h.energy,'#39d98a');
-  if(s.running){$('arena').src='/api/frame.png?t='+Date.now();}
+  if(s.running){
+    const t=Date.now();
+    $('arena').src='/api/frame.png?t='+t;
+    $('senses').src='/api/senses.png?t='+t;
+  }
+  // "what it sees" hint
+  const legend='The fan is its <b>vision</b> (green = food, grey = wall), the '+
+    'purple arrow is <b>smell</b>, red arcs are <b>touch</b>, and the corner '+
+    'bars are its <b>body</b> (energy / temperature / health).';
+  if(colony){
+    $('arena').style.cursor='crosshair';
+    const f=st.focus;
+    $('sensesHint').innerHTML=(f?('Inspecting creature <b>#'+f.id+'</b> '+
+      '(generation '+(f.generation+1)+', age '+f.age+', energy '+f.energy+'). '):'')+
+      '<br><b>Click any creature</b> in the world above to see through its eyes.<br><br>'+legend;
+  } else {
+    $('arena').style.cursor='default';
+    $('sensesHint').innerHTML='This is the agent’s own view.<br><br>'+legend;
+  }
 }
 
 function buildControls(s){
@@ -214,6 +241,14 @@ $('start').onclick=async()=>{
     body:JSON.stringify({scenario:SEL,switches})});
 };
 $('stop').onclick=()=>fetch('/api/stop',{method:'POST'});
+
+// click a creature in the world to inspect what it sees (colony)
+$('arena').onclick=(ev)=>{
+  const r=ev.target.getBoundingClientRect();
+  const fx=(ev.clientX-r.left)/r.width, fy=(ev.clientY-r.top)/r.height;
+  fetch('/api/focus',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({fx,fy})});
+};
 
 poll(); setInterval(poll,400);
 </script>

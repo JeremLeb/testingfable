@@ -274,7 +274,7 @@ def run(cfg, verbose: bool = True, on_step=None, should_stop=None) -> dict:
         buffer.add(obs, motor, reward, 0.0 if term else 1.0)
         body["energy"] = info["energy"]
         if on_step is not None and step % gui_every == 0:
-            on_step({"step": step, "info": info, "env": env,
+            on_step({"step": step, "info": info, "env": env, "obs": obs,
                      "metrics": live["metrics"], "eval": live["eval"],
                      "asleep": not awake, "sps": step / (time.time() - t0)})
         ep_reward += reward

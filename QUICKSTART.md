@@ -51,6 +51,8 @@ Your browser opens to a dashboard. If it doesn't, go to
      together in one bigger world: they forage the same food, bump into each
      other, breed into live offspring (new dots appear, coloured by
      generation), starve, die, and evolve in place. The most fun to watch.
+     **Click any creature** to see through its eyes (its live first-person
+     senses appear in the "What it senses" panel).
    - **GPU · biological** — one full "living" creature on your GPU (recommended
      if you have one).
    - **CPU · biological** — the same single creature, runs anywhere.

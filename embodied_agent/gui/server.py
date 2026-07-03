@@ -60,7 +60,12 @@ class GuiState:
         self.running = False
         self.colony_mode = False
         self.frame_png = _placeholder_png()
+        self.senses_png = _placeholder_png()
         self.renderer = None
+        self.senses_renderer = None
+        self.sensor_cfg = None
+        self.focused_id = None          # creature the user clicked to inspect
+        self._snap = None               # {S, pts:[(id,x,y)]} for click->creature
         self.device = "cpu"
         self.status = {"phase": "idle", "step": 0, "message": "Press Start."}
         self.config = {}
@@ -80,6 +85,9 @@ class GuiState:
             self.stop_flag = False
             self.running = True
             self.renderer = None
+            self.senses_renderer = None
+            self.focused_id = None
+            self._snap = None
             self.history = {k: [] for k in self.history}
             self.status = {"phase": "starting", "step": 0,
                            "message": "Building the world..."}
@@ -98,6 +106,7 @@ class GuiState:
         try:
             preset = SCENARIOS.get(scenario, SCENARIOS["bio_cpu"])[0]
             cfg = load_config(preset)
+            self.sensor_cfg = cfg.sensor
             self.colony_mode = (scenario == "colony")
             if not self.colony_mode:
                 for key, on in switches.items():   # per-switch overrides
@@ -165,6 +174,7 @@ class GuiState:
         # frame: throttle to ~10 fps regardless of training speed
         if now - self._last_frame_t > 0.1:
             self._render(s["env"], info)
+            self._render_senses(s.get("obs"))
             self._last_frame_t = now
         # history: one point every ~0.3 s, capped
         if now - self._last_hist_t > 0.3:
@@ -219,7 +229,19 @@ class GuiState:
         with self.lock:
             self.status.update(status)
         if now - self._last_frame_t > 0.1:
-            self._render_colony(s["env"])
+            env = s["env"]
+            foc = self._resolve_focus(env)
+            self._render_colony(env, foc.id if foc else None)
+            if foc is not None:
+                self._render_senses(foc.observe())
+                with self.lock:
+                    self.status["focus"] = {
+                        "id": foc.id, "generation": foc.generation,
+                        "age": foc.age,
+                        "energy": round(foc.homeostasis.energy, 2)}
+                    self._snap = {"S": env.cfg.arena_size,
+                                  "pts": [(c.id, float(c.pos[0]),
+                                           float(c.pos[1])) for c in env.living]}
             self._last_frame_t = now
         if now - self._last_hist_t > 0.3:
             with self.lock:
@@ -233,18 +255,53 @@ class GuiState:
                         del v[0]
             self._last_hist_t = now
 
-    def _render_colony(self, env):
+    def _render_colony(self, env, focus_id=None):
         try:
             if self.renderer is None:
                 from ..colony.render import ColonyRenderer
                 self.renderer = ColonyRenderer(env)
-            arr = self.renderer.render()
+            arr = self.renderer.render(focus_id=focus_id)
             buf = io.BytesIO()
             mpimg.imsave(buf, arr, format="png")
             with self.lock:
                 self.frame_png = buf.getvalue()
         except Exception:
             traceback.print_exc()
+
+    def _resolve_focus(self, env):
+        """The creature to inspect: the user's click if still alive, else the
+        oldest (most-established) creature as a sensible default."""
+        living = env.living
+        if not living:
+            return None
+        by_id = {c.id: c for c in living}
+        if self.focused_id in by_id:
+            return by_id[self.focused_id]
+        return max(living, key=lambda c: c.age)
+
+    def _render_senses(self, obs):
+        try:
+            if obs is None or self.sensor_cfg is None:
+                return
+            if self.senses_renderer is None:
+                from .senses import SensesRenderer
+                self.senses_renderer = SensesRenderer(self.sensor_cfg)
+            png = self.senses_renderer.png(obs)
+            with self.lock:
+                self.senses_png = png
+        except Exception:
+            traceback.print_exc()
+
+    def focus_at(self, fx: float, fy: float):
+        """Map a click (fractions of the arena image) to the nearest creature."""
+        snap = self._snap
+        if not snap or not snap["pts"]:
+            return
+        S = snap["S"]
+        wx, wy = fx * S, (1.0 - fy) * S
+        best = min(snap["pts"],
+                   key=lambda p: (p[1] - wx) ** 2 + (p[2] - wy) ** 2)
+        self.focused_id = best[0]
 
     def _narrate_colony(self, st) -> str:
         if st["population"] <= 0:
@@ -291,6 +348,10 @@ class GuiState:
         with self.lock:
             return self.frame_png
 
+    def senses_bytes(self) -> bytes:
+        with self.lock:
+            return self.senses_png
+
 
 STATE = GuiState()
 
@@ -330,6 +391,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, STATE.state_json(), "application/json")
         elif path == "/api/frame.png":
             self._send(200, STATE.frame_bytes(), "image/png")
+        elif path == "/api/senses.png":
+            self._send(200, STATE.senses_bytes(), "image/png")
         elif path == "/favicon.ico":
             self._send(204, b"", "image/x-icon")
         else:
@@ -349,6 +412,12 @@ class Handler(BaseHTTPRequestHandler):
                        "application/json")
         elif self.path == "/api/stop":
             STATE.stop()
+            self._send(200, b'{"ok":true}', "application/json")
+        elif self.path == "/api/focus":
+            try:
+                STATE.focus_at(float(req.get("fx", 0)), float(req.get("fy", 0)))
+            except Exception:
+                pass
             self._send(200, b'{"ok":true}', "application/json")
         else:
             self._send(404, b"not found", "text/plain")

@@ -55,6 +55,15 @@ python -m embodied_agent.colony.run --config colony     # headless
 
 Creatures are coloured by generation, so new lineages are visible as they
 appear; the panel tracks population, births/deaths, and the newest generation.
+
+**See through a creature's eyes.** Click any creature in the world to inspect
+it — the dashboard rings it and shows its live **first-person senses**: the
+vision fan (green = food, grey = wall), a smell arrow, touch, and its body
+state. Each creature perceives from its own body, so two neighbours see
+completely different things.
+
+![what a creature sees](docs/assets/senses.png)
+
 Code lives in `embodied_agent/colony/` (`ColonyEnv`, `Creature`, `Mind`,
 `run_colony`) and reuses the single-agent senses, homeostasis, and world model
 unchanged — it's the same body and brain, just many independent copies in one

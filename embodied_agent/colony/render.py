@@ -21,9 +21,12 @@ class ColonyRenderer:
         self._extent = (0, S, 0, S)
         self._cmap = plt.get_cmap("turbo")
 
-    def render(self) -> np.ndarray:
+    def render(self, focus_id=None) -> np.ndarray:
         env, ax = self.env, self.ax
         ax.clear()
+        # axes fill the whole (square) figure so a browser click maps linearly
+        # to world coords: wx = fx*S, wy = (1-fy)*S.
+        ax.set_position([0, 0, 1, 1])
         S = env.cfg.arena_size
         ax.imshow(self._temp_img, origin="lower", extent=self._extent,
                   cmap="coolwarm", vmin=0, vmax=1, alpha=0.5)
@@ -45,13 +48,17 @@ class ColonyRenderer:
             tip = c.pos + np.array([np.cos(c.heading), np.sin(c.heading)]) * r * 1.5
             ax.plot([c.pos[0], tip[0]], [c.pos[1], tip[1]],
                     color="white", linewidth=1.0, alpha=0.8)
+            if focus_id is not None and c.id == focus_id:  # the inspected one
+                ax.add_patch(Circle(c.pos, r * 2.1, fill=False, color="#ffd24c",
+                                    lw=2.0, zorder=6))
         s = env.stats()
-        ax.set_title(f"population {s['population']}   births {s['births']}   "
-                     f"deaths {s['deaths']}   max gen {s['max_generation']}",
-                     fontsize=10)
+        ax.text(0.5, 0.985, f"population {s['population']}   births "
+                f"{s['births']}   deaths {s['deaths']}   max gen "
+                f"{s['max_generation']}", transform=ax.transAxes, ha="center",
+                va="top", fontsize=9, color="#111",
+                bbox=dict(boxstyle="round", fc="white", ec="none", alpha=0.6))
         ax.set_xlim(0, S); ax.set_ylim(0, S)
         ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
-        self.fig.tight_layout(pad=0.3)
         self.fig.canvas.draw()
         buf = np.asarray(self.fig.canvas.buffer_rgba())
         return buf[..., :3].copy()

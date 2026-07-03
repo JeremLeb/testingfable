@@ -1,6 +1,8 @@
 """Browser-free tests for the observation GUI and the run() live hooks."""
 import json
 
+import numpy as np
+
 from embodied_agent.config import load_config
 from embodied_agent.gui.server import SCENARIOS, SWITCHES, GuiState, _placeholder_png
 
@@ -31,6 +33,32 @@ def test_state_json_is_valid_and_complete():
         assert key in d
     assert d["running"] is False
     assert set(d["scenarios"]) == set(SCENARIOS)
+
+
+def test_senses_renderer_draws_rays_and_retina():
+    from embodied_agent.gui.senses import SensesRenderer
+    cfg = load_config("colony")
+    n = cfg.sensor.n_rays
+    vision = np.zeros(n * 4, dtype=np.float32)
+    vision[1] = 1.0  # first ray sees food
+    obs = {"vision": vision, "touch": np.zeros(cfg.sensor.touch_sectors),
+           "smell": np.array([0.6, 0.3, -0.2]), "intero": np.array([0.8, 0.5, 0.9])}
+    sr = SensesRenderer(cfg.sensor)
+    png = sr.png(obs)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    # pixel-retina path also renders
+    png2 = sr.png({"retina": np.zeros((3, 8, 8), dtype=np.float32)})
+    assert png2[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_focus_click_selects_nearest_creature():
+    from embodied_agent.gui.server import GuiState
+    gs = GuiState()
+    gs._snap = {"S": 10.0, "pts": [(5, 1.0, 1.0), (9, 8.0, 8.0)]}
+    gs.focus_at(0.8, 0.2)   # -> world (8, 8): nearest is creature 9
+    assert gs.focused_id == 9
+    gs.focus_at(0.1, 0.9)   # -> world (1, 1): nearest is creature 5
+    assert gs.focused_id == 5
 
 
 def test_run_live_hooks_fire_and_stop_early():

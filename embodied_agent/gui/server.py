@@ -295,17 +295,32 @@ class GuiState:
 STATE = GuiState()
 
 
+# client-disconnect errors (very common on Windows: browsers open then abort
+# speculative connections). These are harmless -- swallow them quietly instead
+# of letting http.server print an alarming traceback for each.
+_CONN_ERRORS = (BrokenPipeError, ConnectionError)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # quiet
         pass
 
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except _CONN_ERRORS:
+            self.close_connection = True
+
     def _send(self, code, body, ctype):
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        except _CONN_ERRORS:
+            self.close_connection = True  # client went away mid-response
 
     def do_GET(self):
         path = self.path.split("?")[0]
@@ -315,6 +330,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, STATE.state_json(), "application/json")
         elif path == "/api/frame.png":
             self._send(200, STATE.frame_bytes(), "image/png")
+        elif path == "/favicon.ico":
+            self._send(204, b"", "image/x-icon")
         else:
             self._send(404, b"not found", "text/plain")
 

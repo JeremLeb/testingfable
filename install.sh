@@ -16,8 +16,14 @@ echo "=============================================="
 echo " Embodied Agent - installer ($MODE build)"
 echo "=============================================="
 
-PY="python3"; command -v python3 >/dev/null 2>&1 || PY="python"
-echo "[1/4] Creating virtual environment (.venv) ..."
+# Prefer a Python that HAS CUDA PyTorch wheels (3.12/3.11/3.13). The newest
+# Python (e.g. 3.14) often has no GPU wheels yet, which silently forces CPU.
+PY=""
+for v in 3.12 3.11 3.13 3.10; do
+  if command -v "python$v" >/dev/null 2>&1; then PY="python$v"; break; fi
+done
+[ -z "$PY" ] && { command -v python3 >/dev/null 2>&1 && PY=python3 || PY=python; }
+echo "[1/4] Creating virtual environment (.venv) with $PY ..."
 $PY -m venv .venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
@@ -27,7 +33,11 @@ echo "[2/4] Installing PyTorch ..."
 if [ "$MODE" = "gpu" ]; then
   echo "      (CUDA build from $CUDA_URL - large download, be patient)"
   pip install torch --index-url "$CUDA_URL" || {
-    echo "      GPU build failed; falling back to the CPU build."
+    echo ""
+    echo "      !! Could not install the CUDA build - there may be no GPU wheel"
+    echo "      !! for this Python. Falling back to CPU-only PyTorch."
+    echo "      !! For GPU support, use Python 3.12 and re-run this script."
+    echo ""
     pip install torch
   }
 else

@@ -19,8 +19,13 @@ OK, WARN, BAD = "✅", "⚠️", "❌"
 def _check_python() -> bool:
     v = sys.version_info
     ok = v >= (3, 9)
-    print(f"{OK if ok else BAD} Python {v.major}.{v.minor}.{v.micro}"
-          f"{'' if ok else '  (need 3.9+)'}")
+    note = ""
+    if v >= (3, 14):
+        note = "  (very new — GPU/CUDA PyTorch wheels may not exist yet; " \
+               "Python 3.12 is the safe choice)"
+    elif not ok:
+        note = "  (need 3.9+)"
+    print(f"{OK if ok else BAD} Python {v.major}.{v.minor}.{v.micro}{note}")
     return ok
 
 
@@ -37,17 +42,50 @@ def _check_packages() -> bool:
     return ok
 
 
+def _physical_nvidia_gpus() -> list:
+    """GPU names reported by the driver (nvidia-smi), independent of PyTorch."""
+    import shutil
+    import subprocess
+    if not shutil.which("nvidia-smi"):
+        return []
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=8)
+        return [ln.strip() for ln in out.stdout.splitlines() if ln.strip()]
+    except Exception:
+        return []
+
+
 def _check_gpu() -> str:
     try:
         import torch
     except Exception:
         print(f"{BAD} PyTorch missing -- cannot check the GPU")
         return "cpu"
+    print(f"   (PyTorch build: {torch.__version__})")
+    build = getattr(torch.version, "cuda", None)
     if not torch.cuda.is_available():
-        print(f"{WARN} No CUDA GPU visible to PyTorch -- training will use the "
-              f"CPU (slower but works).")
-        print("     If you have an NVIDIA GPU, install the CUDA build of "
-              "PyTorch (the installer does this for you).")
+        cpu_build = build is None or "+cpu" in torch.__version__
+        gpus = _physical_nvidia_gpus()
+        if gpus:
+            # a real GPU is present but PyTorch can't use it -- the usual cause
+            print(f"{BAD} Found an NVIDIA GPU ({', '.join(gpus)}) but PyTorch "
+                  f"cannot use it.")
+            if cpu_build:
+                print(f"     The installed PyTorch is the CPU-only build "
+                      f"({torch.__version__}). You need the CUDA build.")
+            if sys.version_info >= (3, 14):
+                print(f"     Likely cause: Python {sys.version_info.major}."
+                      f"{sys.version_info.minor} has no CUDA PyTorch wheels yet."
+                      f"  Use Python 3.12 (see the fix below).")
+            print("     Fix: install Python 3.12 from python.org, delete the "
+                  ".venv folder, and re-run the installer.")
+        else:
+            print(f"{WARN} No CUDA GPU visible to PyTorch -- training will use "
+                  f"the CPU (slower but works).")
+            print("     If you do have an NVIDIA GPU, install its drivers and "
+                  "the CUDA build of PyTorch (the installer does this).")
         return "cpu"
     name = torch.cuda.get_device_name(0)
     props = torch.cuda.get_device_properties(0)

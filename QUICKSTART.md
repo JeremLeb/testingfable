@@ -95,8 +95,19 @@ brain‑like *local* learning rule instead of standard backprop).
 
 ## Troubleshooting
 
-- **"No GPU found" but I have one** → re‑run the installer; make sure you have
-  NVIDIA drivers installed. It still works on CPU meanwhile.
+- **"No GPU found" but I have one (e.g. an RTX 4060 Ti)** → almost always a
+  **Python‑version** problem: PyTorch doesn't ship CUDA (GPU) builds for the
+  very newest Python yet (3.14 at time of writing), so the installer falls back
+  to the CPU build. Fix:
+  1. Install **Python 3.12** from [python.org](https://www.python.org/downloads/release/python-3120/)
+     (on Windows tick *"Add Python to PATH"*).
+  2. Delete the **`.venv`** folder in this project.
+  3. Re‑run the installer (`install.bat` / `bash install.sh`). It now prefers
+     Python 3.12–3.13 automatically.
+  4. Run `python -m embodied_agent.doctor` — it will tell you the exact cause
+     and confirm once the GPU is active.
+  Also make sure your **NVIDIA drivers** are installed (`nvidia-smi` should list
+  your card). It works on CPU in the meantime.
 - **Browser didn't open** → go to http://localhost:8000 manually.
 - **"Port already in use"** → run `bash run.sh --port 8001` (or `run.bat
   --port 8001`) and open that port.

@@ -47,9 +47,13 @@ Your browser opens to a dashboard. If it doesn't, go to
 ![the dashboard](docs/assets/dashboard.png)
 
 1. Pick a **scenario** at the top:
-   - **GPU · biological** — the full "living" creature on your GPU (recommended
+   - **🐜 Colony · community** — a *whole population* of creatures living
+     together in one bigger world: they forage the same food, bump into each
+     other, breed into live offspring (new dots appear, coloured by
+     generation), starve, die, and evolve in place. The most fun to watch.
+   - **GPU · biological** — one full "living" creature on your GPU (recommended
      if you have one).
-   - **CPU · biological** — the same creature, runs anywhere.
+   - **CPU · biological** — the same single creature, runs anywhere.
    - **CPU · baseline** — a plain textbook AI with none of the biology, for
      comparison.
 2. Leave the **biological switches** ticked (or untick some to see what each

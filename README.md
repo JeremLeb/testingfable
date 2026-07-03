@@ -25,12 +25,36 @@ bash run.sh          # opens http://localhost:8000 in your browser
 
 ![live dashboard](docs/assets/dashboard.png)
 
-Pick a scenario (GPU biological / CPU biological / CPU baseline), toggle the
-biological switches, press **Start**, and watch the arena, the body's
+Pick a scenario (Colony / GPU biological / CPU biological / CPU baseline),
+toggle the biological switches, press **Start**, and watch the arena, the body's
 energy/temperature/integrity, the falling world-model prediction error, and a
 plain-language readout of what it's doing. `python -m embodied_agent.doctor`
 checks your machine and GPU; `python -m embodied_agent.gui` launches the
 dashboard directly.
+
+### 🐜 The living colony (many creatures, one world)
+
+The **Colony** scenario runs a whole *community*: many creatures share one
+bigger world and one learned **"species brain"** (a single world model + actor
+trained on everyone's pooled experience), while each creature keeps its own
+body, recurrent state, and **genome** (its set-points and instincts). They
+forage the same food, collide with each other, **reproduce into live offspring**
+(a mutated genome, a new dot on screen), starve and die, and are topped up by
+immigration — so the population, its lineages, and its innate traits **evolve in
+place** while the shared brain keeps learning.
+
+```bash
+python -m embodied_agent.colony.run --config colony     # headless
+# …or just pick "Colony" in the GUI and press Start
+```
+
+![the colony](docs/assets/colony.png)
+
+Creatures are coloured by generation, so new lineages are visible as they
+appear; the panel tracks population, births/deaths, and the newest generation.
+Code lives in `embodied_agent/colony/` (`ColonyEnv`, `Creature`, `run_colony`)
+and reuses the single-agent senses, homeostasis, and world model unchanged —
+it's the same body, just many of them in one shared world.
 
 **Full operating manual** — every command, flag, config key, output column,
 extension point, and troubleshooting table: [docs/MANUAL.md](docs/MANUAL.md).

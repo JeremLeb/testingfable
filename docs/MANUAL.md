@@ -223,7 +223,19 @@ python -m embodied_agent.train --config cpu_bio                          # Phase
 python -m embodied_agent.scripts.evolution_demo --config cpu_small       # B5 (Phase 2)
 python -m embodied_agent.scripts.active_inference_demo --config cpu_small # B6 (Phase 3)
 python -m embodied_agent.scripts.predictive_coding_demo --config cpu_small # B7 (Phase 3)
+python -m embodied_agent.colony.run --config colony                     # living colony
 ```
+
+**Living colony** (`embodied_agent/colony/`): many creatures share one bigger
+world and one learned "species brain" (world model + actor trained on pooled
+experience), each with its own body, recurrent state, and genome; they contest
+food, collide, reproduce into live offspring (mutated genome), die, and are
+refilled by immigration. `ColonyConfig` sets `n_init` / `n_max` / `n_min`,
+reproduction (`repro_energy_threshold`, `repro_rate`, `repro_cost`),
+`mutation_rate`, and `creature_collision_damage`; the `colony` preset also
+enlarges the arena and food. Run headless with `python -m embodied_agent.colony
+.run --config colony`, or pick **Colony** in the GUI. `run_colony(cfg,
+on_step=…, should_stop=…)` mirrors `train.run`'s live hooks.
 
 **B6 active inference** is `agent.objective` = `return` (baseline: λ-returns of
 reward + curiosity) or `expected_free_energy` (minimize EFE = pragmatic
@@ -266,9 +278,10 @@ Presets live in `embodied_agent/configs/`: `cpu_small.yaml` (fast, discrete
 latents + two-hot reward + ray vision), `cpu_pixels.yaml` (CPU smoke of the
 pixel retina + CNN), `cpu_bio.yaml` (cpu_small with all Phase-1 biological
 mechanisms on), `gpu_laptop.yaml` (biological stack, mid-size model, tuned for
-a laptop RTX 4060 Ti / 8 GB — `device: cuda` auto-falls back to CPU), and
-`gpu_default.yaml` (full pixel-retina stack for a desktop GPU). A YAML
-preset overrides the dataclass defaults in `embodied_agent/config.py`;
+a laptop RTX 4060 Ti / 8 GB — `device: cuda` auto-falls back to CPU),
+`gpu_default.yaml` (full pixel-retina stack for a desktop GPU), and
+`colony.yaml` (the multi-agent living colony: bigger arena, shared brain). A
+YAML preset overrides the dataclass defaults in `embodied_agent/config.py`;
 unknown keys raise an error. Pass either a preset name or a YAML path to
 `--config`. Rates are **per step** unless noted; the arena uses abstract
 length units; all viability variables live in [0, 1].

@@ -26,6 +26,10 @@ SCENARIOS = {
     "bio_gpu": ("gpu_laptop",
                 "The living agent, bigger model, on your GPU (RTX 4060 Ti). "
                 "Falls back to CPU if no GPU."),
+    "colony": ("colony",
+               "A whole COMMUNITY: many creatures share one world and one brain "
+               "-- they forage the same food, collide, breed into live "
+               "offspring, and evolve. (Biological switches don't apply here.)"),
 }
 
 # Biological switches the UI can toggle on top of a scenario.
@@ -53,6 +57,7 @@ class GuiState:
         self.thread: threading.Thread | None = None
         self.stop_flag = False
         self.running = False
+        self.colony_mode = False
         self.frame_png = _placeholder_png()
         self.renderer = None
         self.device = "cpu"
@@ -89,36 +94,34 @@ class GuiState:
             self.status["message"] = "Stopping after this step..."
 
     def _train(self, scenario: str, switches: dict, steps: int | None):
-        from ..train import run
         try:
             preset = SCENARIOS.get(scenario, SCENARIOS["bio_cpu"])[0]
             cfg = load_config(preset)
-            # apply per-switch overrides
-            for key, on in switches.items():
-                if key in ("neuromod", "sleep", "dev", "metab"):
-                    getattr(cfg, key).enabled = bool(on)
-            if switches.get("active_inference"):
-                cfg.agent.objective = "expected_free_energy"
-                cfg.intrinsic.method = "disagreement"
+            self.colony_mode = (scenario == "colony")
+            if not self.colony_mode:
+                for key, on in switches.items():   # per-switch overrides
+                    if key in ("neuromod", "sleep", "dev", "metab"):
+                        getattr(cfg, key).enabled = bool(on)
             if steps:
                 cfg.train.total_steps = int(steps)
             cfg.train.out_dir = "runs/gui"
             cfg.train.gui_every = cfg.train.gui_every or 6
-            # flush metrics often so the live charts populate quickly
             cfg.train.log_every = min(cfg.train.log_every, 100)
             cfg.train.eval_every = min(cfg.train.eval_every, 2500)
             with self.lock:
-                self.config = {
-                    "scenario": scenario, "preset": preset,
-                    "requested_device": cfg.train.device,
-                    "switches": {k: bool(getattr(cfg, k).enabled)
-                                 for k in ("neuromod", "sleep", "dev", "metab")},
-                    "objective": cfg.agent.objective,
-                    "total_steps": cfg.train.total_steps,
-                }
-            run(cfg, verbose=False, on_step=self._on_step,
-                should_stop=lambda: self.stop_flag)
-            msg = "Stopped." if self.stop_flag else "Training complete."
+                self.config = {"scenario": scenario, "preset": preset,
+                               "requested_device": cfg.train.device,
+                               "colony": self.colony_mode,
+                               "total_steps": cfg.train.total_steps}
+            if self.colony_mode:
+                from ..colony.run import run_colony
+                run_colony(cfg, verbose=False, on_step=self._on_step_colony,
+                           should_stop=lambda: self.stop_flag)
+            else:
+                from ..train import run
+                run(cfg, verbose=False, on_step=self._on_step,
+                    should_stop=lambda: self.stop_flag)
+            msg = "Stopped." if self.stop_flag else "Run complete."
             self._set_phase("done", msg)
         except Exception as e:  # surface the error in the UI, don't crash silently
             traceback.print_exc()
@@ -192,6 +195,68 @@ class GuiState:
         except Exception:
             traceback.print_exc()
 
+    # ------------------------------------------------------ colony callback
+
+    def _on_step_colony(self, s: dict):
+        now = time.time()
+        st = s["stats"]
+        m = s.get("metrics", {})
+        status = {
+            "phase": "colony",
+            "step": s["step"],
+            "sps": round(s.get("sps", 0.0), 1),
+            "population": st["population"],
+            "births": st["births"],
+            "deaths": st["deaths"],
+            "generation": st["max_generation"],
+            "energy": round(st.get("mean_energy", 0.0), 3),
+            "temp": round(st.get("mean_temp", 0.5), 3),
+            "integrity": round(st.get("mean_integrity", 1.0), 3),
+            "wm_loss": round(float(m.get("loss", 0.0)), 3),
+            "message": self._narrate_colony(st),
+        }
+        with self.lock:
+            self.status.update(status)
+        if now - self._last_frame_t > 0.1:
+            self._render_colony(s["env"])
+            self._last_frame_t = now
+        if now - self._last_hist_t > 0.3:
+            with self.lock:
+                h = self.history
+                h["step"].append(s["step"])
+                h["reward"].append(float(st["population"]))     # chart 1
+                h["energy"].append(float(st.get("mean_energy", 0)))
+                h["wm_loss"].append(float(m.get("loss", 0)))
+                for v in h.values():
+                    if len(v) > 500:
+                        del v[0]
+            self._last_hist_t = now
+
+    def _render_colony(self, env):
+        try:
+            if self.renderer is None:
+                from ..colony.render import ColonyRenderer
+                self.renderer = ColonyRenderer(env)
+            arr = self.renderer.render()
+            buf = io.BytesIO()
+            mpimg.imsave(buf, arr, format="png")
+            with self.lock:
+                self.frame_png = buf.getvalue()
+        except Exception:
+            traceback.print_exc()
+
+    def _narrate_colony(self, st) -> str:
+        if st["population"] <= 0:
+            return "The colony has died out."
+        parts = [f"{st['population']} creatures alive"]
+        if st["max_generation"] > 0:
+            parts.append(f"now on generation {st['max_generation'] + 1}")
+        if st.get("mean_energy", 1) < 0.3:
+            parts.append("food is scarce — hard times, some are starving")
+        elif st["births"] > st["deaths"]:
+            parts.append("well-fed and breeding — the community is growing")
+        return "; ".join(parts) + "."
+
     def _narrate(self, s, info) -> str:
         """Plain-language description of what the body is doing right now."""
         if s.get("asleep"):
@@ -213,6 +278,7 @@ class GuiState:
     def state_json(self) -> bytes:
         with self.lock:
             payload = {"running": self.running, "device": self.device,
+                       "mode": "colony" if self.colony_mode else "single",
                        "status": dict(self.status), "config": dict(self.config),
                        "history": {k: list(v) for k, v in self.history.items()},
                        "scenarios": {k: v[1] for k, v in SCENARIOS.items()},

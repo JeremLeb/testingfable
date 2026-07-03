@@ -33,11 +33,17 @@ class DreamerAgent:
 
     @torch.no_grad()
     def act(self, obs, env=None, noise: float = 0.0,
-            deterministic: bool = False) -> np.ndarray:
+            deterministic: bool = False, bias=None) -> np.ndarray:
         feat = self._encode(obs)
         action = self.ac.actor.act(feat, noise=noise,
                                    deterministic=deterministic)
         action_np = action.squeeze(0).cpu().numpy()
+        # optional innate action bias (a genome's instinct) layered on top of
+        # the learned policy -- the colony shares one brain but each creature
+        # differs by genome.
+        if bias is not None:
+            action_np = np.clip(action_np + np.asarray(bias, dtype=np.float32),
+                                -1.0, 1.0)
         self.last_intervened = False
         if self.shield is not None and env is not None:
             safe, intervened = self.shield.filter(env, action_np)

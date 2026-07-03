@@ -1,0 +1,53 @@
+# A living colony: many creatures in one bigger shared world, foraging the same
+# food, colliding, reproducing into live offspring, and evolving in place -- all
+# driven by one shared "species brain". CPU-friendly small brain; `device: cuda`
+# auto-uses your GPU when present.
+#
+#   python -m embodied_agent.colony.run --config colony
+#   (or pick "Colony" in the GUI:  python -m embodied_agent.gui)
+env:
+  arena_size: 32.0            # a bigger map for a community
+  n_food: 24                 # plenty of contested food
+  food_energy: 0.4
+  food_respawn_steps: 200
+  n_obstacles: 4
+  n_hot: 2
+  n_cold: 2
+  base_metabolism: 0.0010
+sensor:
+  vision_mode: rays
+  n_rays: 16                 # shared body plan (all creatures see alike)
+model:
+  embed_dim: 64
+  deter_dim: 128
+  hidden: 128
+  latent_kind: discrete
+  latent_groups: 12
+  latent_classes: 12
+  reward_head: twohot
+  reward_bins: 41
+agent:
+  horizon: 10
+  expl_noise: 0.3
+intrinsic:
+  method: rnd
+colony:
+  n_init: 10
+  n_max: 24
+  n_min: 4
+  repro_energy_threshold: 0.70
+  repro_rate: 0.005
+  repro_cost: 0.30
+  mutation_rate: 0.12
+  creature_collision_damage: 0.03
+train:
+  total_steps: 300000
+  seq_len: 24
+  batch_size: 32
+  train_every: 4
+  updates_per_train: 1
+  log_every: 500
+  gui_every: 6
+  buffer_capacity: 200000
+  device: cuda
+  out_dir: runs/colony

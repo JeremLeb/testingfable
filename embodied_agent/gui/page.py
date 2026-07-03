@@ -27,7 +27,7 @@ PAGE = r"""<!doctype html>
     border-radius:12px;padding:16px;margin-bottom:16px}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   .scn{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
-  .scn button{flex:1;min-width:210px;text-align:left;cursor:pointer;
+  .scn button{flex:1;min-width:200px;text-align:left;cursor:pointer;
     background:var(--panel2);border:1px solid var(--line);color:var(--ink);
     border-radius:10px;padding:11px 13px}
   .scn button.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
@@ -53,7 +53,6 @@ PAGE = r"""<!doctype html>
   .say b{color:var(--accent)}
   .stat{display:flex;justify-content:space-between;padding:7px 0;
     border-bottom:1px dashed var(--line)}
-  .stat:last-child{border:none}
   .stat span{color:var(--muted)}
   .stat b{font-variant-numeric:tabular-nums}
   .bar{height:9px;border-radius:6px;background:var(--panel2);overflow:hidden;
@@ -64,6 +63,7 @@ PAGE = r"""<!doctype html>
   .phase{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;
     background:var(--panel2);border:1px solid var(--line)}
   .phase.awake{color:var(--green)} .phase.asleep{color:var(--blue)}
+  .phase.colony{color:var(--green)}
   .phase.error{color:var(--red)} .phase.done{color:var(--orange)}
   .charts{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:16px}
   canvas{width:100%;height:150px;background:var(--panel2);border-radius:9px}
@@ -74,7 +74,7 @@ PAGE = r"""<!doctype html>
 <body>
 <header>
   <h1>🌱 Embodied Agent — live</h1>
-  <span class="sub">watch a body learn to stay alive by predicting its own senses</span>
+  <span class="sub">watch a body — or a whole colony — learn to stay alive</span>
   <span id="dev" class="badge">device …</span>
 </header>
 <main>
@@ -90,13 +90,13 @@ PAGE = r"""<!doctype html>
 
   <div class="grid">
     <div class="card">
-      <h3>The world (the agent is the blue dot)</h3>
+      <h3 id="worldTitle">The world</h3>
       <img id="arena" src="/api/frame.png" alt="arena">
       <div class="say" id="say">Pick a scenario above and press <b>Start</b>.</div>
     </div>
     <div class="card">
-      <h3>Body & learning</h3>
-      <div class="barlab"><span>Energy (food)</span><b id="e_v">—</b></div>
+      <h3 id="panelTitle">Body &amp; learning</h3>
+      <div class="barlab"><span id="e_l">Energy (food)</span><b id="e_v">—</b></div>
       <div class="bar"><div id="e_b" style="width:0;background:var(--green)"></div></div>
       <div class="barlab"><span>Temperature (comfort)</span><b id="t_v">—</b></div>
       <div class="bar"><div id="t_b" style="width:0;background:var(--blue)"></div></div>
@@ -105,24 +105,31 @@ PAGE = r"""<!doctype html>
       <div class="stat"><span>State</span><b><span id="phase" class="phase">idle</span></b></div>
       <div class="stat"><span>Step</span><b id="step">0</b></div>
       <div class="stat"><span>Speed</span><b id="sps">0</b> <span>steps/s</span></div>
-      <div class="stat"><span>Food eaten (life)</span><b id="food">0</b></div>
+      <div id="singleStats">
+        <div class="stat"><span>Food eaten (life)</span><b id="food">0</b></div>
+        <div class="stat"><span>Eval reward vs random</span><b id="er">—</b></div>
+      </div>
+      <div id="colonyStats" style="display:none">
+        <div class="stat"><span>Population alive</span><b id="pop">—</b></div>
+        <div class="stat"><span>Births / Deaths</span><b><span id="births">0</span> / <span id="deaths">0</span></b></div>
+        <div class="stat"><span>Newest generation</span><b id="gen">0</b></div>
+      </div>
       <div class="stat"><span>Prediction error (world model)</span><b id="wm">—</b></div>
-      <div class="stat"><span>Eval reward vs random</span><b id="er">—</b></div>
     </div>
   </div>
 
   <div class="charts">
-    <div class="card"><div class="ctitle">Reward over time (higher = healthier)</div>
+    <div class="card"><div class="ctitle" id="t_reward">Reward over time</div>
       <canvas id="c_reward"></canvas></div>
-    <div class="card"><div class="ctitle">World-model prediction error (should fall)</div>
+    <div class="card"><div class="ctitle" id="t_wm">World-model prediction error (should fall)</div>
       <canvas id="c_wm"></canvas></div>
-    <div class="card"><div class="ctitle">Body energy over time</div>
+    <div class="card"><div class="ctitle" id="t_energy">Body energy over time</div>
       <canvas id="c_energy"></canvas></div>
   </div>
 </main>
 
 <script>
-let SEL="bio_cpu", META=null;
+let SEL="colony", META=null;
 const $=id=>document.getElementById(id);
 
 function drawChart(cv, ys, color){
@@ -140,41 +147,52 @@ function drawChart(cv, ys, color){
 }
 function bar(el,val,txt){$(el+'_b').style.width=Math.max(0,Math.min(1,val))*100+'%';
   $(el+'_v').textContent=txt;}
+const num=(v,d=2)=>(v==null?'—':(+v).toFixed(d));
 
 async function poll(){
   let s; try{s=await (await fetch('/api/state')).json();}catch(e){return;}
   if(!META){META=s; buildControls(s);}
   const dev=$('dev'); dev.textContent=(s.device==='cuda'?'GPU (CUDA)':'CPU');
   dev.className='badge'+(s.device==='cuda'?' gpu':'');
-  const st=s.status||{};
+  const st=s.status||{}, colony=(s.mode==='colony');
   $('msg').textContent=st.message||'';
   $('say').innerHTML='<b>'+(st.phase||'')+'</b> — '+(st.message||'');
-  $('step').textContent=st.step??0;
-  $('sps').textContent=st.sps??0;
-  $('food').textContent=st.food_total??0;
+  $('step').textContent=st.step??0; $('sps').textContent=st.sps??0;
+  const ph=$('phase'); ph.textContent=st.phase||'idle'; ph.className='phase '+(st.phase||'');
+  bar('e',st.energy??0,num(st.energy)); bar('t',st.temp??0,num(st.temp));
+  bar('i',st.integrity??0,num(st.integrity));
   $('wm').textContent=st.wm_loss??'—';
-  $('er').textContent=(st.eval_reward??'—');
-  const ph=$('phase'); ph.textContent=st.phase||'idle';
-  ph.className='phase '+(st.phase||'');
-  bar('e',st.energy??0,(st.energy??0).toFixed?.(2)??'—');
-  bar('t',(st.temp??0),(st.temp??0).toFixed(2));
-  bar('i',st.integrity??0,(st.integrity??0).toFixed(2));
+  // mode-specific panels
+  $('singleStats').style.display=colony?'none':'';
+  $('colonyStats').style.display=colony?'':'none';
+  $('worldTitle').textContent=colony?'The colony (each dot is a creature, colour = generation)'
+                                     :'The world (the agent is the blue dot)';
+  $('panelTitle').textContent=colony?'Colony':'Body & learning';
+  $('e_l').textContent=colony?'Mean energy (colony)':'Energy (food)';
+  $('t_reward').textContent=colony?'Population over time':'Reward over time (higher = healthier)';
+  $('t_energy').textContent=colony?'Mean colony energy':'Body energy over time';
+  if(colony){
+    $('pop').textContent=st.population??'—'; $('births').textContent=st.births??0;
+    $('deaths').textContent=st.deaths??0; $('gen').textContent=(st.generation!=null?st.generation+1:0);
+  } else {
+    $('food').textContent=st.food_total??0; $('er').textContent=(st.eval_reward??'—');
+  }
   $('start').disabled=s.running; $('stop').disabled=!s.running;
   const h=s.history||{};
-  drawChart($('c_reward'),h.reward,'#4c8dff');
+  drawChart($('c_reward'),h.reward,colony?'#39d98a':'#4c8dff');
   drawChart($('c_wm'),h.wm_loss,'#ffab4c');
   drawChart($('c_energy'),h.energy,'#39d98a');
-  if(s.running){const im=$('arena'); im.src='/api/frame.png?t='+Date.now();}
+  if(s.running){$('arena').src='/api/frame.png?t='+Date.now();}
 }
 
 function buildControls(s){
   const scn=$('scn'); scn.innerHTML='';
-  const order=['bio_gpu','bio_cpu','baseline'];
+  const order=['colony','bio_gpu','bio_cpu','baseline'];
+  const name={colony:'🐜 Colony · community',bio_gpu:'GPU · biological',
+    bio_cpu:'CPU · biological',baseline:'CPU · baseline'};
   order.forEach(k=>{ if(!(k in s.scenarios))return;
     const b=document.createElement('button'); b.dataset.k=k;
-    const name={bio_gpu:'GPU · biological',bio_cpu:'CPU · biological',
-      baseline:'CPU · baseline'}[k];
-    b.innerHTML='<b>'+name+'</b><span>'+s.scenarios[k]+'</span>';
+    b.innerHTML='<b>'+(name[k]||k)+'</b><span>'+s.scenarios[k]+'</span>';
     if(k===SEL)b.classList.add('sel');
     b.onclick=()=>{SEL=k;[...scn.children].forEach(c=>c.classList.remove('sel'));
       b.classList.add('sel');};

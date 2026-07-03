@@ -72,6 +72,17 @@ class ReplayBuffer:
                 self._size -= len(dropped["reward"])
         self._current = Episode()
 
+    def ingest(self, episode: "Episode"):
+        """Finalise and store an externally-built Episode. Lets several streams
+        (e.g. the many creatures of a colony) feed one shared buffer."""
+        if len(episode) >= 2:
+            ep = episode.finalize()
+            self.episodes.append(ep)
+            self._size += len(episode)
+            while self._size > self.capacity and len(self.episodes) > 1:
+                dropped = self.episodes.pop(0)
+                self._size -= len(dropped["reward"])
+
     @property
     def num_steps(self) -> int:
         return self._size

@@ -276,6 +276,24 @@ class EvolutionConfig:
 
 
 @dataclass
+class ColonyConfig:
+    # A living community: many creatures share one world (and one "species
+    # brain"), forage the same food, collide, reproduce into live offspring,
+    # and evolve in place. Run via the colony runner / GUI scenario.
+    n_init: int = 10              # creatures alive at the start
+    n_max: int = 24              # population cap (compute bound)
+    n_min: int = 4               # respawn newcomers if population falls below
+    creature_radius: float = 0.4
+    creature_collision_damage: float = 0.03   # integrity lost bumping others
+    # reproduction: sustained energy surplus -> a live, mutated offspring
+    repro_energy_threshold: float = 0.72
+    repro_rate: float = 0.004     # reproductive readiness gained per surplus step
+    repro_cost: float = 0.3       # energy the parent spends bearing one child
+    mutation_rate: float = 0.12   # genome std as a fraction of each gene's range
+    newcomer_random: bool = True  # respawns get fresh random genomes (immigration)
+
+
+@dataclass
 class TrainConfig:
     total_steps: int = 30000
     warmup_steps: int = 1500      # random-policy steps before training starts
@@ -308,6 +326,7 @@ class Config:
     dev: DevelopmentConfig = field(default_factory=DevelopmentConfig)
     metab: MetabolismConfig = field(default_factory=MetabolismConfig)
     evolution: EvolutionConfig = field(default_factory=EvolutionConfig)
+    colony: ColonyConfig = field(default_factory=ColonyConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
 
 

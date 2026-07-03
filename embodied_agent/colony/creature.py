@@ -52,8 +52,11 @@ class Creature:
         self.age = 0
         self.repro_readiness = 0.0
         self.alive = True
-        # attached by the runner: a DreamerAgent (shared brain, own state) and
-        # a replay Episode. Kept here so births/deaths manage them together.
+        # attached by the runner: this creature's mind (its own world model +
+        # actor + memory, unless the colony is set to a shared brain), a
+        # DreamerAgent carrying its recurrent state, and a replay Episode.
+        self.parent = None       # set at birth; the runner inherits its brain
+        self.mind = None
         self.agent = None
         self.episode = None
         self.obs = self.sensors.observe(self)

@@ -283,6 +283,11 @@ class ColonyConfig:
     n_init: int = 10              # creatures alive at the start
     n_max: int = 24              # population cap (compute bound)
     n_min: int = 4               # respawn newcomers if population falls below
+    # each creature has its OWN mind (world model + actor + memory), learning
+    # from its own life; set shared_brain True for one pooled "species brain".
+    shared_brain: bool = False
+    brain_inherit: bool = True    # newborns inherit a copy of the parent's brain
+    max_trains_per_step: int = 6  # cap minds trained per step (keeps it real-time)
     creature_radius: float = 0.4
     creature_collision_damage: float = 0.03   # integrity lost bumping others
     # reproduction: sustained energy surplus -> a live, mutated offspring

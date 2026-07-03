@@ -69,15 +69,49 @@ def test_death_and_immigration_floor():
     assert min(pops) >= cfg.colony.n_min       # immigration holds the floor
 
 
-def test_run_colony_trains_shared_brain():
-    from embodied_agent.colony.run import run_colony
+def _spaces(cfg):
+    from embodied_agent.env.sensors import SensorSuite
+    return SensorSuite(cfg.sensor, cfg.env, np.random.default_rng(0)).spaces
+
+
+def test_each_creature_gets_its_own_mind():
+    import torch
+    from embodied_agent.colony.run import Mind
     cfg = _tiny(load_config("colony"))
-    cfg.colony.n_init = 6
-    cfg.colony.n_max = 10
-    cfg.train.total_steps = 200
-    cfg.train.seq_len = 12
-    cfg.train.batch_size = 8
-    cfg.train.log_every = 100
-    out = run_colony(cfg, verbose=False)
-    assert out["stats"]["population"] >= cfg.colony.n_min
-    assert out["buffer_steps"] > 0             # pooled experience was stored
+    sp = _spaces(cfg)
+    a, b = Mind(cfg, sp, "cpu"), Mind(cfg, sp, "cpu")
+    assert a.wm is not b.wm and a.buffer is not b.buffer   # separate individuals
+    # training one mind must not touch another's weights (independent learning)
+    before = next(b.wm.parameters()).detach().clone()
+    opt = a.wm.opt
+    x = next(a.wm.parameters()); opt.zero_grad(); (x.sum()).backward(); opt.step()
+    assert torch.allclose(before, next(b.wm.parameters()).detach())
+
+
+def test_newborn_inherits_parent_brain():
+    import torch
+    from embodied_agent.colony.run import Mind
+    cfg = _tiny(load_config("colony"))
+    sp = _spaces(cfg)
+    parent = Mind(cfg, sp, "cpu")
+    child = Mind(cfg, sp, "cpu")
+    child.inherit_from(parent)
+    for p, c in zip(parent.wm.parameters(), child.wm.parameters()):
+        assert torch.allclose(p.detach(), c.detach())
+
+
+def test_run_colony_individual_and_shared():
+    from embodied_agent.colony.run import run_colony
+    for shared in (False, True):
+        cfg = _tiny(load_config("colony"))
+        cfg.colony.n_init = 5
+        cfg.colony.n_max = 8
+        cfg.colony.shared_brain = shared
+        cfg.colony.max_trains_per_step = 3
+        cfg.train.total_steps = 150
+        cfg.train.seq_len = 12
+        cfg.train.batch_size = 8
+        cfg.train.log_every = 100
+        out = run_colony(cfg, verbose=False)
+        assert out["shared_brain"] is shared
+        assert out["stats"]["population"] >= cfg.colony.n_min

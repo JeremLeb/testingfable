@@ -27,9 +27,10 @@ SCENARIOS = {
                 "The living agent, bigger model, on your GPU (RTX 4060 Ti). "
                 "Falls back to CPU if no GPU."),
     "colony": ("colony",
-               "A whole COMMUNITY: many creatures share one world and one brain "
-               "-- they forage the same food, collide, breed into live "
-               "offspring, and evolve. (Biological switches don't apply here.)"),
+               "A whole COMMUNITY of INDIVIDUALS: each creature has its own "
+               "body, senses and mind (its own brain + memory). They share a "
+               "world, forage, collide, breed (offspring inherit a parent's "
+               "brain), and evolve. (Biological switches don't apply here.)"),
 }
 
 # Biological switches the UI can toggle on top of a scenario.
@@ -248,9 +249,10 @@ class GuiState:
     def _narrate_colony(self, st) -> str:
         if st["population"] <= 0:
             return "The colony has died out."
-        parts = [f"{st['population']} creatures alive"]
+        parts = [f"{st['population']} individuals alive, each with its own mind"]
         if st["max_generation"] > 0:
-            parts.append(f"now on generation {st['max_generation'] + 1}")
+            parts.append(f"now on generation {st['max_generation'] + 1} "
+                         f"(offspring inherited a parent's brain)")
         if st.get("mean_energy", 1) < 0.3:
             parts.append("food is scarce — hard times, some are starving")
         elif st["births"] > st["deaths"]:

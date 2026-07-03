@@ -17,13 +17,15 @@ env:
 sensor:
   vision_mode: rays
   n_rays: 16                 # shared body plan (all creatures see alike)
+# each creature carries its OWN small brain, so keep the per-brain model tiny;
+# it scales up on a GPU by raising these and n_max.
 model:
   embed_dim: 64
-  deter_dim: 128
-  hidden: 128
+  deter_dim: 64
+  hidden: 64
   latent_kind: discrete
-  latent_groups: 12
-  latent_classes: 12
+  latent_groups: 8
+  latent_classes: 8
   reward_head: twohot
   reward_bins: 41
 agent:
@@ -32,9 +34,12 @@ agent:
 intrinsic:
   method: rnd
 colony:
-  n_init: 10
-  n_max: 24
+  n_init: 8
+  n_max: 16
   n_min: 4
+  shared_brain: false          # each creature is its own individual mind
+  brain_inherit: true          # newborns inherit a copy of the parent's brain
+  max_trains_per_step: 6       # cap minds trained per step (keeps it real-time)
   repro_energy_threshold: 0.70
   repro_rate: 0.005
   repro_cost: 0.30
@@ -43,11 +48,9 @@ colony:
 train:
   total_steps: 300000
   seq_len: 24
-  batch_size: 32
-  train_every: 4
-  updates_per_train: 1
+  batch_size: 24
   log_every: 500
   gui_every: 6
-  buffer_capacity: 200000
+  buffer_capacity: 20000        # per creature
   device: cuda
   out_dir: runs/colony

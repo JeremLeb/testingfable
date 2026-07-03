@@ -34,14 +34,17 @@ dashboard directly.
 
 ### 🐜 The living colony (many creatures, one world)
 
-The **Colony** scenario runs a whole *community*: many creatures share one
-bigger world and one learned **"species brain"** (a single world model + actor
-trained on everyone's pooled experience), while each creature keeps its own
-body, recurrent state, and **genome** (its set-points and instincts). They
-forage the same food, collide with each other, **reproduce into live offspring**
-(a mutated genome, a new dot on screen), starve and die, and are topped up by
-immigration — so the population, its lineages, and its innate traits **evolve in
-place** while the shared brain keeps learning.
+The **Colony** scenario runs a whole *community* of **individuals**: each
+creature has its own body, its own senses, its own **genome** (set-points and
+instincts), and — crucially — its **own mind**: a private world model + actor +
+memory that learns only from that creature's own life. Newborns **inherit a copy
+of a parent's brain** (nature), then diverge through their own experience
+(nurture). They forage the same food, collide, **reproduce into live offspring**
+(a new dot on screen, a fresh mind), starve and die (a mind dies with its body),
+and are topped up by immigration — so the population, its lineages, its innate
+traits *and* what each individual has learned all **evolve in place**. (Set
+`colony.shared_brain: true` for the alternative: one pooled brain for the whole
+species.)
 
 ```bash
 python -m embodied_agent.colony.run --config colony     # headless
@@ -52,9 +55,10 @@ python -m embodied_agent.colony.run --config colony     # headless
 
 Creatures are coloured by generation, so new lineages are visible as they
 appear; the panel tracks population, births/deaths, and the newest generation.
-Code lives in `embodied_agent/colony/` (`ColonyEnv`, `Creature`, `run_colony`)
-and reuses the single-agent senses, homeostasis, and world model unchanged —
-it's the same body, just many of them in one shared world.
+Code lives in `embodied_agent/colony/` (`ColonyEnv`, `Creature`, `Mind`,
+`run_colony`) and reuses the single-agent senses, homeostasis, and world model
+unchanged — it's the same body and brain, just many independent copies in one
+shared world (a rotating per-step training budget keeps it real-time).
 
 **Full operating manual** — every command, flag, config key, output column,
 extension point, and troubleshooting table: [docs/MANUAL.md](docs/MANUAL.md).

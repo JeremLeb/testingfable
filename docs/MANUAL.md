@@ -226,16 +226,21 @@ python -m embodied_agent.scripts.predictive_coding_demo --config cpu_small # B7 
 python -m embodied_agent.colony.run --config colony                     # living colony
 ```
 
-**Living colony** (`embodied_agent/colony/`): many creatures share one bigger
-world and one learned "species brain" (world model + actor trained on pooled
-experience), each with its own body, recurrent state, and genome; they contest
-food, collide, reproduce into live offspring (mutated genome), die, and are
-refilled by immigration. `ColonyConfig` sets `n_init` / `n_max` / `n_min`,
-reproduction (`repro_energy_threshold`, `repro_rate`, `repro_cost`),
-`mutation_rate`, and `creature_collision_damage`; the `colony` preset also
-enlarges the arena and food. Run headless with `python -m embodied_agent.colony
-.run --config colony`, or pick **Colony** in the GUI. `run_colony(cfg,
-on_step=…, should_stop=…)` mirrors `train.run`'s live hooks.
+**Living colony** (`embodied_agent/colony/`): many creatures in one bigger
+shared world, each an **individual** with its own body, senses, genome, and its
+own **mind** (`Mind` = a private world model + actor + replay buffer, learning
+only from its own life); newborns inherit a copy of a parent's brain
+(`brain_inherit`) then diverge, and a mind dies with its body. They contest
+food, collide, reproduce into live offspring, die, and are refilled by
+immigration. `ColonyConfig` sets `n_init` / `n_max` / `n_min`, `shared_brain`
+(one pooled brain instead of individuals), `brain_inherit`,
+`max_trains_per_step` (rotating per-step training budget), reproduction
+(`repro_energy_threshold`, `repro_rate`, `repro_cost`), `mutation_rate`, and
+`creature_collision_damage`; the `colony` preset also enlarges the arena/food
+and keeps each per-creature brain small. Run headless with `python -m
+embodied_agent.colony.run --config colony` (`--shared-brain` to pool), or pick
+**Colony** in the GUI. `run_colony(cfg, on_step=…, should_stop=…)` mirrors
+`train.run`'s live hooks.
 
 **B6 active inference** is `agent.objective` = `return` (baseline: λ-returns of
 reward + curiosity) or `expected_free_energy` (minimize EFE = pragmatic

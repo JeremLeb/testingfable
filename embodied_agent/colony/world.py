@@ -195,7 +195,9 @@ class ColonyEnv:
                           self.cfg.agent_radius,
                           self.cfg.arena_size - self.cfg.agent_radius)
             self.births += 1
-            return self._spawn(g, pos=off, generation=c.generation + 1)
+            child = self._spawn(g, pos=off, generation=c.generation + 1)
+            child.parent = c   # so the runner can inherit the parent's mind
+            return child
         return None
 
     # ------------------------------------------------------ reporting

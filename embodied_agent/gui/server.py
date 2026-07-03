@@ -210,8 +210,23 @@ class GuiState:
 
     def _on_step_colony(self, s: dict):
         now = time.time()
+        env = s["env"]
         st = s["stats"]
         m = s.get("metrics", {})
+        foc = self._resolve_focus(env)
+        # the body bars show the INSPECTED individual's own stats (not the
+        # colony average); fall back to colony means only if nobody is alive.
+        if foc is not None:
+            h = foc.homeostasis
+            energy, temp, integ = h.energy, h.temp, h.integrity
+            focus = {"id": foc.id, "generation": foc.generation, "age": foc.age,
+                     "energy": round(h.energy, 2), "temp": round(h.temp, 2),
+                     "integrity": round(h.integrity, 2)}
+        else:
+            energy = st.get("mean_energy", 0.0)
+            temp = st.get("mean_temp", 0.5)
+            integ = st.get("mean_integrity", 1.0)
+            focus = None
         status = {
             "phase": "colony",
             "step": s["step"],
@@ -220,28 +235,24 @@ class GuiState:
             "births": st["births"],
             "deaths": st["deaths"],
             "generation": st["max_generation"],
-            "energy": round(st.get("mean_energy", 0.0), 3),
-            "temp": round(st.get("mean_temp", 0.5), 3),
-            "integrity": round(st.get("mean_integrity", 1.0), 3),
+            "energy": round(energy, 3),         # inspected creature
+            "temp": round(temp, 3),
+            "integrity": round(integ, 3),
+            "mean_energy": round(st.get("mean_energy", 0.0), 3),  # community
             "wm_loss": round(float(m.get("loss", 0.0)), 3),
             "message": self._narrate_colony(st),
+            "focus": focus,
         }
         with self.lock:
             self.status.update(status)
         if now - self._last_frame_t > 0.1:
-            env = s["env"]
-            foc = self._resolve_focus(env)
             self._render_colony(env, foc.id if foc else None)
             if foc is not None:
                 self._render_senses(foc.observe())
-                with self.lock:
-                    self.status["focus"] = {
-                        "id": foc.id, "generation": foc.generation,
-                        "age": foc.age,
-                        "energy": round(foc.homeostasis.energy, 2)}
-                    self._snap = {"S": env.cfg.arena_size,
-                                  "pts": [(c.id, float(c.pos[0]),
-                                           float(c.pos[1])) for c in env.living]}
+            with self.lock:
+                self._snap = {"S": env.cfg.arena_size,
+                              "pts": [(c.id, float(c.pos[0]), float(c.pos[1]))
+                                      for c in env.living]}
             self._last_frame_t = now
         if now - self._last_hist_t > 0.3:
             with self.lock:

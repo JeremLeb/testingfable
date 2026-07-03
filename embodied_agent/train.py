@@ -260,6 +260,11 @@ def run(cfg, verbose: bool = True, on_step=None, should_stop=None) -> dict:
         if should_stop is not None and should_stop():
             log("stop requested"); break
         awake = sleep_ctl is None or sleep_ctl.is_awake(step)
+        # hunger arousal: a starving body wakes itself to forage rather than
+        # sleeping to death (biological drive overrides the circadian clock).
+        if (not awake and cfg.sleep.wake_energy > 0
+                and body["energy"] < cfg.sleep.wake_energy):
+            awake = True
         # B4: the agent acts on a (possibly delayed) perception, and the world
         # receives a (possibly delayed, noisy) action.
         percept = smr.perceive(obs) if smr is not None else obs

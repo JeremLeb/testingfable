@@ -202,6 +202,10 @@ class SleepConfig:
     # of each day is sleep. Phase is exposed as an interoceptive-style signal.
     day_steps: int = 1000
     wake_frac: float = 0.8         # fraction of a day spent awake and foraging
+    # hunger arousal: if energy falls below this while asleep, the agent wakes
+    # up to forage (starving overrides the circadian clock -- so it doesn't
+    # sleep itself to death). Set to 0 to disable.
+    wake_energy: float = 0.35
     # while awake the agent does only *light* fast adaptation; the bulk of
     # world-model consolidation is deferred to sleep (complementary systems).
     wake_updates: int = 1          # updates per train_every during wake

@@ -110,6 +110,7 @@ PAGE = r"""<!doctype html>
         <div class="stat"><span>Eval reward vs random</span><b id="er">—</b></div>
       </div>
       <div id="colonyStats" style="display:none">
+        <div class="stat"><span>Inspecting (click a creature)</span><b id="inspecting">—</b></div>
         <div class="stat"><span>Population alive</span><b id="pop">—</b></div>
         <div class="stat"><span>Births / Deaths</span><b><span id="births">0</span> / <span id="deaths">0</span></b></div>
         <div class="stat"><span>Newest generation</span><b id="gen">0</b></div>
@@ -176,11 +177,13 @@ async function poll(){
   $('colonyStats').style.display=colony?'':'none';
   $('worldTitle').textContent=colony?'The colony (each dot is a creature, colour = generation)'
                                      :'The world (the agent is the blue dot)';
-  $('panelTitle').textContent=colony?'Colony':'Body & learning';
-  $('e_l').textContent=colony?'Mean energy (colony)':'Energy (food)';
+  $('panelTitle').textContent=colony?'Inspected creature & colony':'Body & learning';
+  $('e_l').textContent=colony?'Energy (this creature)':'Energy (food)';
   $('t_reward').textContent=colony?'Population over time':'Reward over time (higher = healthier)';
   $('t_energy').textContent=colony?'Mean colony energy':'Body energy over time';
   if(colony){
+    const f=st.focus;
+    $('inspecting').textContent=f?('#'+f.id+'  ·  gen '+(f.generation+1)+'  ·  age '+f.age):'—';
     $('pop').textContent=st.population??'—'; $('births').textContent=st.births??0;
     $('deaths').textContent=st.deaths??0; $('gen').textContent=(st.generation!=null?st.generation+1:0);
   } else {

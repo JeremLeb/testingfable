@@ -112,10 +112,12 @@ def run_colony(cfg, verbose: bool = True, on_step=None, should_stop=None) -> dic
         for b in births:
             attach(b)
 
-        # train a rotating handful of minds each step (bounds real-time cost)
+        # train a rotating handful of minds (bounds real-time cost); only on
+        # every train_every-th step so heavy per-brain training doesn't dominate.
         living = env.living
         trained, seen, unique = 0, 0, set()
-        while living and trained < cfg.colony.max_trains_per_step \
+        while step % max(cfg.colony.train_every, 1) == 0 and living \
+                and trained < cfg.colony.max_trains_per_step \
                 and seen < len(living):
             c = living[ptr % len(living)]
             ptr += 1

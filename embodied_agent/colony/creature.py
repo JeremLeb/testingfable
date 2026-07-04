@@ -26,6 +26,8 @@ class Creature:
         self.id = Creature._next_id
         Creature._next_id += 1
         self.generation = generation
+        self.founder = self.id   # the gen-0 ancestor of this bloodline
+        self.birth_step = 0      # colony step it was born on (set by the env)
 
         g = genome.genes
         # the body plan (morphology, kinematics, world) is shared; the genome

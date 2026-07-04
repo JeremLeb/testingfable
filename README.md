@@ -53,6 +53,13 @@ python -m embodied_agent.colony.run --config colony     # headless
 
 ![the colony](docs/assets/colony.png)
 
+**Watch it evolve.** An *Evolution & family tree* panel tracks the population's
+innate traits (thermal set-point, foraging instinct, hunger weight) drifting
+across generations as selection acts, and draws the live **family tree** — who
+descended from whom, which bloodlines survive, which die out.
+
+![evolution and family tree](docs/assets/evolution_live.png)
+
 Creatures are coloured by generation, so new lineages are visible as they
 appear; the panel tracks population, births/deaths, and the newest generation.
 

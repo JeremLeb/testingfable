@@ -144,6 +144,27 @@ PAGE = r"""<!doctype html>
     <div class="card"><div class="ctitle" id="t_energy">Body energy over time</div>
       <canvas id="c_energy"></canvas></div>
   </div>
+
+  <div class="card" id="evoCard" style="display:none;margin-top:16px">
+    <h3>🧬 Evolution &amp; family tree</h3>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+      <div style="flex:1;min-width:300px">
+        <div class="ctitle">Innate traits drifting across generations
+          (each trace scaled to its own range)</div>
+        <canvas id="c_genes" style="height:180px"></canvas>
+        <div class="sub" style="margin-top:6px">
+          <span style="color:#4c8dff">■</span> thermal set-point &nbsp;
+          <span style="color:#39d98a">■</span> forward instinct &nbsp;
+          <span style="color:#ffab4c">■</span> hunger weight
+        </div>
+      </div>
+      <div style="text-align:center">
+        <img id="tree" src="/api/tree.png" alt="family tree"
+             style="width:440px;max-width:100%;border-radius:10px;background:#0e1116">
+        <div class="sub" id="lineageHint" style="margin-top:6px"></div>
+      </div>
+    </div>
+  </div>
 </main>
 
 <script>
@@ -162,6 +183,19 @@ function drawChart(cv, ys, color){
   c.stroke();
   c.globalAlpha=.12; c.lineTo(x(ys.length-1),H-pad); c.lineTo(x(0),H-pad);
   c.closePath(); c.fillStyle=color; c.fill(); c.globalAlpha=1;
+}
+function drawMulti(cv, series){
+  const c=cv.getContext('2d'), W=cv.width=cv.clientWidth, H=cv.height=cv.clientHeight;
+  c.clearRect(0,0,W,H);
+  series.forEach(s=>{
+    const ys=s.ys; if(!ys||ys.length<2)return;
+    let lo=Math.min(...ys), hi=Math.max(...ys); if(hi-lo<1e-9){hi+=1;lo-=1;}
+    const pad=6, x=i=>pad+i*(W-2*pad)/(ys.length-1),
+          y=v=>H-pad-(v-lo)*(H-2*pad)/(hi-lo);
+    c.strokeStyle=s.color; c.lineWidth=2; c.beginPath();
+    ys.forEach((v,i)=>{i?c.lineTo(x(i),y(v)):c.moveTo(x(i),y(v));});
+    c.stroke();
+  });
 }
 function bar(el,val,txt){$(el+'_b').style.width=Math.max(0,Math.min(1,val))*100+'%';
   $(el+'_v').textContent=txt;}
@@ -207,6 +241,20 @@ async function poll(){
     $('arena').src='/api/frame.png?t='+t;
     $('senses').src='/api/senses.png?t='+t;
     $('predict').src='/api/predict.png?t='+t;
+  }
+  // evolution & family tree (colony only)
+  $('evoCard').style.display=colony?'':'none';
+  if(colony){
+    drawMulti($('c_genes'),[
+      {ys:h.g_temp,color:'#4c8dff'},
+      {ys:h.g_bias,color:'#39d98a'},
+      {ys:h.g_wenergy,color:'#ffab4c'}]);
+    if(s.running)$('tree').src='/api/tree.png?t='+Date.now();
+    const L=st.lineages||[];
+    $('lineageHint').innerHTML=L.length?
+      ('Surviving bloodlines: '+L.map(x=>'#'+x[0]+' ('+x[1]+')').join(',  ')+
+       '.  Bright dots are alive; faint are ancestors.'):
+      'Each tree is a founding lineage; bright dots are alive.';
   }
   // "what it sees" hint
   const legend='The fan is its <b>vision</b> (green = food, grey = wall), the '+

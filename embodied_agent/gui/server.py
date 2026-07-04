@@ -62,8 +62,11 @@ class GuiState:
         self.frame_png = _placeholder_png()
         self.senses_png = _placeholder_png()
         self.predict_png = _placeholder_png()
+        self.tree_png = _placeholder_png()
         self.renderer = None
         self.senses_renderer = None
+        self.tree_renderer = None
+        self._last_tree_t = 0.0
         self.sensor_cfg = None
         self.focused_id = None          # creature the user clicked to inspect
         self._snap = None               # {S, pts:[(id,x,y)]} for click->creature
@@ -72,7 +75,8 @@ class GuiState:
         self.config = {}
         self.history = {k: [] for k in
                         ("step", "reward", "energy", "temp", "integrity",
-                         "wm_loss", "eval_reward", "eval_food")}
+                         "wm_loss", "eval_reward", "eval_food",
+                         "g_temp", "g_bias", "g_wenergy")}
         self._last_frame_t = 0.0
         self._last_hist_t = 0.0
         self._t_start = 0.0
@@ -87,6 +91,7 @@ class GuiState:
             self.running = True
             self.renderer = None
             self.senses_renderer = None
+            self.tree_renderer = None
             self.focused_id = None
             self._snap = None
             self.history = {k: [] for k in self.history}
@@ -261,13 +266,23 @@ class GuiState:
                               "pts": [(c.id, float(c.pos[0]), float(c.pos[1]))
                                       for c in env.living]}
             self._last_frame_t = now
+        # family tree changes slowly -> render it less often
+        if now - self._last_tree_t > 1.0:
+            self._render_tree(env, foc.id if foc else None)
+            with self.lock:
+                self.status["lineages"] = env.lineages()[:6]
+            self._last_tree_t = now
         if now - self._last_hist_t > 0.3:
+            g = env.gene_means()
             with self.lock:
                 h = self.history
                 h["step"].append(s["step"])
                 h["reward"].append(float(st["population"]))     # chart 1
                 h["energy"].append(float(st.get("mean_energy", 0)))
                 h["wm_loss"].append(float(m.get("loss", 0)))
+                h["g_temp"].append(g["temp_setpoint"])
+                h["g_bias"].append(g["action_bias_thrust"])
+                h["g_wenergy"].append(g["w_energy"])
                 for v in h.values():
                     if len(v) > 500:
                         del v[0]
@@ -283,6 +298,19 @@ class GuiState:
             mpimg.imsave(buf, arr, format="png")
             with self.lock:
                 self.frame_png = buf.getvalue()
+        except Exception:
+            traceback.print_exc()
+
+    def _render_tree(self, env, focus_id=None):
+        try:
+            if self.tree_renderer is None:
+                from ..colony.tree import TreeRenderer
+                self.tree_renderer = TreeRenderer()
+            arr = self.tree_renderer.render(env, focus_id=focus_id)
+            buf = io.BytesIO()
+            mpimg.imsave(buf, arr, format="png")
+            with self.lock:
+                self.tree_png = buf.getvalue()
         except Exception:
             traceback.print_exc()
 
@@ -402,6 +430,10 @@ class GuiState:
         with self.lock:
             return self.predict_png
 
+    def tree_bytes(self) -> bytes:
+        with self.lock:
+            return self.tree_png
+
 
 STATE = GuiState()
 
@@ -445,6 +477,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, STATE.senses_bytes(), "image/png")
         elif path == "/api/predict.png":
             self._send(200, STATE.predict_bytes(), "image/png")
+        elif path == "/api/tree.png":
+            self._send(200, STATE.tree_bytes(), "image/png")
         elif path == "/favicon.ico":
             self._send(204, b"", "image/x-icon")
         else:

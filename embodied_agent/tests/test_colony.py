@@ -100,6 +100,32 @@ def test_newborn_inherits_parent_brain():
         assert torch.allclose(p.detach(), c.detach())
 
 
+def test_lineage_gene_means_and_tree():
+    from embodied_agent.colony.tree import TreeRenderer
+    cfg = load_config("colony")
+    cfg.colony.n_init = 5
+    cfg.colony.n_max = 14
+    cfg.colony.repro_energy_threshold = 0.0
+    cfg.colony.repro_rate = 0.05
+    env = ColonyEnv(cfg, seed=1)
+    env.reset()
+    founders = {c.founder for c in env.living}
+    assert founders == {c.id for c in env.living}   # founders are themselves
+    for _ in range(60):
+        env.step({c.id: np.zeros(2) for c in env.living})
+    # offspring inherit the parent's bloodline (founder) and a later generation
+    kids = [c for c in env.living if c.generation > 0]
+    assert kids and all(c.founder in founders for c in kids)
+    # gene means expose the heritable innate traits
+    gm = env.gene_means()
+    assert {"temp_setpoint", "action_bias_thrust", "w_energy"} <= set(gm)
+    # lineage counts sum to the living population
+    assert sum(n for _, n in env.lineages()) == len(env.living)
+    # the family tree renders
+    png_arr = TreeRenderer().render(env, focus_id=env.living[0].id)
+    assert png_arr.ndim == 3 and png_arr.shape[2] == 3
+
+
 def test_run_colony_individual_and_shared():
     from embodied_agent.colony.run import run_colony
     for shared in (False, True):

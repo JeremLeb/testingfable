@@ -53,6 +53,7 @@ class ColonyEnv:
         heading = self.rng.uniform(-np.pi, np.pi)
         c = Creature(self, genome, pos, heading,
                      seed=int(self.rng.integers(1 << 31)), generation=generation)
+        c.birth_step = self.steps
         self.creatures.append(c)
         return c
 
@@ -196,7 +197,8 @@ class ColonyEnv:
                           self.cfg.arena_size - self.cfg.agent_radius)
             self.births += 1
             child = self._spawn(g, pos=off, generation=c.generation + 1)
-            child.parent = c   # so the runner can inherit the parent's mind
+            child.parent = c          # so the runner can inherit the parent's mind
+            child.founder = c.founder  # same bloodline as the parent
             return child
         return None
 
@@ -220,3 +222,33 @@ class ColonyEnv:
                                              for c in living])),
             "mean_age": float(np.mean([c.age for c in living])),
         }
+
+    # ------------------------------------------------------ evolution / lineage
+    def gene_means(self) -> dict:
+        """Population-mean innate traits of the living -- these drift as
+        selection acts, so the colony evolves in place."""
+        living = self.living
+        if not living:
+            return {"temp_setpoint": 0.0, "action_bias_thrust": 0.0,
+                    "w_energy": 0.0}
+        def m(k):
+            return float(np.mean([c.genome.genes[k] for c in living]))
+        return {"temp_setpoint": m("temp_setpoint"),
+                "action_bias_thrust": m("action_bias_thrust"),
+                "w_energy": m("w_energy")}
+
+    def lineages(self):
+        """(founder_id, living_count) per surviving bloodline, biggest first."""
+        from collections import Counter
+        return Counter(c.founder for c in self.living).most_common()
+
+    def tree_creatures(self):
+        """Every creature that is alive or an ancestor of a living one -- the
+        family tree of the current population (dead ancestors are retained)."""
+        keep = {}
+        for c in self.living:
+            node = c
+            while node is not None and id(node) not in keep:
+                keep[id(node)] = node
+                node = node.parent
+        return list(keep.values())

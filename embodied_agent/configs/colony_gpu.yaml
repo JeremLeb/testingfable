@@ -1,0 +1,54 @@
+# A bigger living colony for a GPU (e.g. laptop RTX 4060 Ti): each creature
+# still has its OWN individual mind, but the per-brain model is larger (so the
+# GPU is actually busy and creatures are smarter) and the population is bigger.
+# `device: cuda` auto-falls back to CPU. The GUI's "Colony" scenario picks this
+# automatically when a CUDA GPU is present.
+#
+#   python -m embodied_agent.colony.run --config colony_gpu
+env:
+  arena_size: 40.0            # a bigger world for a bigger community
+  n_food: 40
+  food_energy: 0.4
+  food_respawn_steps: 200
+  n_obstacles: 5
+  n_hot: 3
+  n_cold: 3
+  base_metabolism: 0.0010
+sensor:
+  vision_mode: rays
+  n_rays: 16
+model:
+  embed_dim: 128
+  deter_dim: 256             # a real brain per creature (the GPU eats this)
+  hidden: 256
+  latent_kind: discrete
+  latent_groups: 16
+  latent_classes: 16
+  reward_head: twohot
+  reward_bins: 51
+agent:
+  horizon: 12
+  expl_noise: 0.3
+intrinsic:
+  method: rnd
+colony:
+  n_init: 16
+  n_max: 36
+  n_min: 6
+  shared_brain: false         # each creature is its own individual mind
+  brain_inherit: true
+  max_trains_per_step: 8       # minds trained per step (rotating)
+  repro_energy_threshold: 0.70
+  repro_rate: 0.005
+  repro_cost: 0.30
+  mutation_rate: 0.12
+  creature_collision_damage: 0.03
+train:
+  total_steps: 1000000
+  seq_len: 24
+  batch_size: 32
+  log_every: 500
+  gui_every: 5
+  buffer_capacity: 30000       # per creature
+  device: cuda
+  out_dir: runs/colony_gpu

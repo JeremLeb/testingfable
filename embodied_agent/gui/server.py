@@ -111,6 +111,10 @@ class GuiState:
     def _train(self, scenario: str, switches: dict, steps: int | None):
         try:
             preset = SCENARIOS.get(scenario, SCENARIOS["bio_cpu"])[0]
+            # a GPU gets the bigger colony (larger individual brains, more
+            # creatures); the same individual-minds design either way.
+            if scenario == "colony" and self.device == "cuda":
+                preset = "colony_gpu"
             cfg = load_config(preset)
             self.sensor_cfg = cfg.sensor
             self.colony_mode = (scenario == "colony")

@@ -285,8 +285,11 @@ pixel retina + CNN), `cpu_bio.yaml` (cpu_small with all Phase-1 biological
 mechanisms on), `gpu_laptop.yaml` (biological stack, mid-size model, tuned for
 a laptop RTX 4060 Ti / 8 GB — `device: cuda` auto-falls back to CPU),
 `gpu_default.yaml` (full pixel-retina stack for a desktop GPU), and
-`colony.yaml` (the multi-agent living colony: bigger arena, shared brain). A
-YAML preset overrides the dataclass defaults in `embodied_agent/config.py`;
+`colony.yaml` (the multi-agent living colony, individual minds, CPU-friendly),
+and `colony_gpu.yaml` (a bigger colony for a GPU: larger per-creature brains and
+population, same individual-minds design; the GUI's Colony scenario auto-picks
+it when CUDA is present). A YAML preset overrides the dataclass defaults in
+`embodied_agent/config.py`;
 unknown keys raise an error. Pass either a preset name or a YAML path to
 `--config`. Rates are **per step** unless noted; the arena uses abstract
 length units; all viability variables live in [0, 1].

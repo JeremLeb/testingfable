@@ -22,6 +22,7 @@ from ..intrinsic import build_intrinsic
 from ..model.world_model import WorldModel
 from ..utils.seeding import seed_everything
 from .batched import BatchedActing
+from .batched_train import BatchedWMTrainer
 from .world import ColonyEnv
 
 
@@ -64,6 +65,10 @@ def run_colony(cfg, verbose: bool = True, on_step=None, should_stop=None) -> dic
     # GPU op (same separate brains, computed in parallel). Individual minds only.
     batched = cfg.colony.batched and not shared
     batcher = BatchedActing(cfg, device) if batched else None
+    # batched training: update every mind's world model as one vmapped+grad GPU
+    # pass (the dominant training cost). Actor-critic stays on the rotating budget.
+    batched_train = cfg.colony.batched_train and not shared
+    wm_trainer = BatchedWMTrainer(cfg, device) if batched_train else None
     deter = cfg.model.deter_dim
     obs_keys = sorted(spaces)
 
@@ -141,34 +146,70 @@ def run_colony(cfg, verbose: bool = True, on_step=None, should_stop=None) -> dic
                 shared_mind.buffer.ingest(d.episode)
             if batcher is not None and d.mind is not None:
                 batcher.forget(d.mind)
+            if wm_trainer is not None and d.mind is not None:
+                wm_trainer.forget(d.mind)
             d.agent = d.episode = d.mind = None
         for b in births:
             attach(b)
 
-        # train a rotating handful of minds (bounds real-time cost); only on
-        # every train_every-th step so heavy per-brain training doesn't dominate.
+        # train minds (bounds real-time cost); only on every train_every-th step
+        # so heavy training doesn't dominate the frame rate.
         living = env.living
-        trained, seen, unique = 0, 0, set()
-        while step % max(cfg.colony.train_every, 1) == 0 and living \
-                and trained < cfg.colony.max_trains_per_step \
-                and seen < len(living):
-            c = living[ptr % len(living)]
-            ptr += 1
-            seen += 1
-            mid = id(c.mind)
-            if mid in unique:
-                continue
-            unique.add(mid)
-            if c.mind.buffer.can_sample(cfg.train.seq_len):
-                batch = c.mind.buffer.sample(cfg.train.batch_size,
-                                             cfg.train.seq_len, rng)
-                post, wm_m = c.mind.wm.train_step(batch)
+        do_train = step % max(cfg.colony.train_every, 1) == 0 and living
+        seq, bs = cfg.train.seq_len, cfg.train.batch_size
+
+        if do_train and wm_trainer is not None:
+            # (1) batched WORLD-MODEL update: every sample-ready mind at once.
+            ready, batches, seen_mid = [], [], set()
+            for c in living:
+                mid = id(c.mind)
+                if mid in seen_mid or not c.mind.buffer.can_sample(seq):
+                    continue
+                seen_mid.add(mid)
+                ready.append(c.mind)
+                batches.append(c.mind.buffer.sample(bs, seq, rng))
+            if ready:
+                live["metrics"] = wm_trainer.update(ready, batches)
+            # (2) actor-critic + intrinsic: rotating budget, per mind (lighter).
+            trained, seen, unique = 0, 0, set()
+            while trained < cfg.colony.max_trains_per_step and seen < len(living):
+                c = living[ptr % len(living)]
+                ptr += 1
+                seen += 1
+                mid = id(c.mind)
+                if mid in unique or not c.mind.buffer.can_sample(seq):
+                    continue
+                unique.add(mid)
+                batch = c.mind.buffer.sample(bs, seq, rng)
+                with torch.no_grad():                    # post = imagination starts
+                    _, post, _ = c.mind.wm.loss(batch)
                 ac_m = c.mind.ac.train_step(post)
                 if c.mind.intrinsic is not None:
                     c.mind.intrinsic.train_step(
                         post.feat().reshape(-1, c.mind.wm.rssm.feat_dim).detach())
-                live["metrics"] = {**wm_m, **ac_m}
+                live["metrics"] = {**live["metrics"], **ac_m}
                 trained += 1
+        elif do_train:
+            trained, seen, unique = 0, 0, set()
+            while trained < cfg.colony.max_trains_per_step \
+                    and seen < len(living):
+                c = living[ptr % len(living)]
+                ptr += 1
+                seen += 1
+                mid = id(c.mind)
+                if mid in unique:
+                    continue
+                unique.add(mid)
+                if c.mind.buffer.can_sample(seq):
+                    batch = c.mind.buffer.sample(bs, seq, rng)
+                    post, wm_m = c.mind.wm.train_step(batch)
+                    ac_m = c.mind.ac.train_step(post)
+                    if c.mind.intrinsic is not None:
+                        c.mind.intrinsic.train_step(
+                            post.feat().reshape(
+                                -1, c.mind.wm.rssm.feat_dim).detach())
+                    live["metrics"] = {**wm_m, **ac_m}
+                    trained += 1
 
         if step % max(cfg.train.log_every, 1) == 0:
             s = env.stats()

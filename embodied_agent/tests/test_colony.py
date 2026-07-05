@@ -164,6 +164,155 @@ def test_batched_acting_matches_individual_brains():
         assert torch.allclose(hv, hl, atol=1e-4)
 
 
+def test_batched_wm_twohot_matches_reference():
+    # the vmap-safe arithmetic two-hot must equal the searchsorted/scatter one
+    import torch, torch.nn.functional as F
+    from embodied_agent.model.distributions import TwoHotHead, symlog
+    head = TwoHotHead(8, 16, bins=51, low=-8.0, high=8.0)
+    target = torch.randn(4, 6) * 5.0
+    t = symlog(target)
+    ref = head._twohot(t)                                   # scatter/searchsorted
+    centers = head.centers
+    d = centers[1] - centers[0]
+    tc = t.clamp(centers[0], centers[-1])
+    mine = F.relu(1 - (tc.unsqueeze(-1) - centers).abs() / d)
+    assert torch.allclose(ref, mine, atol=1e-5)
+
+
+def test_batched_wm_observe_matches_rssm():
+    # the plain-math GRU observe step must match the real RSSM obs_step
+    import torch
+    from embodied_agent.colony.run import Mind
+    from embodied_agent.colony.batched_train import _WMLoss
+    from embodied_agent.model.rssm import RSSMState
+    cfg = _tiny(load_config("colony"))
+    sp = _spaces(cfg)
+    m = Mind(cfg, sp, "cpu"); m.wm.eval()
+    wl = _WMLoss(m, cfg)
+    d = lambda v: v if isinstance(v, int) else int(np.prod(v.shape))
+    obs = {k: torch.randn(1, 1, d(v)) for k, v in sp.items()}
+    action = torch.randn(1, 1, 2)
+    gnoise = torch.zeros(1, 1, cfg.model.latent_groups, cfg.model.latent_classes)
+    with torch.no_grad():
+        feat, post_lg, prior_lg = wl._observe(
+            wl.wm.encoder(obs), action, gnoise)
+        embed = m.wm.encoder(obs)[:, 0]
+        r = m.wm.rssm
+        post, prior = r.obs_step(r.initial(1, "cpu"), action[:, 0], embed)
+        assert torch.allclose(post.h, feat[:, 0, :r.deter_dim], atol=1e-5)
+        assert torch.allclose(post.params["logits"], post_lg[:, 0], atol=1e-5)
+        assert torch.allclose(prior.params["logits"], prior_lg[:, 0], atol=1e-5)
+
+
+def _wm_batch(sp, B=4, T=6):
+    import torch
+    d = lambda v: v if isinstance(v, int) else int(np.prod(v.shape))
+    return {"obs": {k: torch.randn(B, T, d(v)) for k, v in sp.items()},
+            "prev_action": torch.randn(B, T, 2),
+            "reward": torch.randn(B, T),
+            "cont": torch.rand(B, T)}
+
+
+def test_batched_wm_grad_vmap_matches_loop():
+    # vmap(grad) over N stacked world models == the per-brain grad loop
+    import torch
+    from torch.func import functional_call, grad, stack_module_state, vmap
+    from embodied_agent.colony.run import Mind
+    from embodied_agent.colony.batched_train import _WMLoss
+    cfg = _tiny(load_config("colony"))
+    sp = _spaces(cfg)
+    N, B, T = 3, 4, 6
+    wl = [_WMLoss(Mind(cfg, sp, "cpu"), cfg) for _ in range(N)]
+    for w in wl:
+        w.eval()
+    batches = [_wm_batch(sp, B, T) for _ in range(N)]
+    G, C = cfg.model.latent_groups, cfg.model.latent_classes
+    gnoise = torch.randn(N, B, T, G, C)
+    obs = {k: torch.stack([b["obs"][k] for b in batches]) for k in sp}
+    act = torch.stack([b["prev_action"] for b in batches])
+    rew = torch.stack([b["reward"] for b in batches])
+    cont = torch.stack([b["cont"] for b in batches])
+    params, buffers = stack_module_state(wl)
+    base = wl[0]
+
+    def loss_fn(p, bf, ob, ac, rw, ct, gn):
+        return functional_call(base, (p, bf), (ob, ac, rw, ct, gn))
+
+    gv = vmap(grad(loss_fn), in_dims=(0, 0, 0, 0, 0, 0, 0))(
+        params, buffers, obs, act, rew, cont, gnoise)
+    for i in range(N):
+        pi = {k: v[i] for k, v in params.items()}
+        bi = {k: v[i] for k, v in buffers.items()}
+        gi = grad(loss_fn)(pi, bi, {k: obs[k][i] for k in sp}, act[i], rew[i],
+                           cont[i], gnoise[i])
+        for name in params:
+            assert torch.allclose(gv[name][i], gi[name], atol=1e-4), name
+
+
+def test_batched_wm_update_matches_perbrain_adam():
+    # the full batched update (grad + per-mind clip + Adam + write-back) must
+    # equal a per-brain functional Adam step given the same sampling noise
+    import torch
+    from torch.func import functional_call, grad
+    from embodied_agent.colony.run import Mind
+    from embodied_agent.colony.batched_train import _WMLoss, BatchedWMTrainer
+    cfg = _tiny(load_config("colony"))
+    sp = _spaces(cfg)
+    N, B, T = 3, 4, 6
+    minds = [Mind(cfg, sp, "cpu") for _ in range(N)]
+    batches = [_wm_batch(sp, B, T) for _ in range(N)]
+    G, C = cfg.model.latent_groups, cfg.model.latent_classes
+    gnoise = torch.randn(N, B, T, G, C)
+    lr, clip = cfg.model.lr, cfg.model.grad_clip
+    b1, b2, eps = 0.9, 0.999, 1e-8
+
+    # reference: one functional Adam step per brain, from zero state
+    expected = []
+    for i, m in enumerate(minds):
+        wl = _WMLoss(m, cfg)
+        p0 = {n: v.detach().clone() for n, v in wl.named_parameters()}
+
+        def loss_fn(p, ob, ac, rw, ct, gn, _wl=wl):
+            bf = dict(_wl.named_buffers())
+            return functional_call(_wl, (p, bf), (ob, ac, rw, ct, gn))
+
+        g = grad(loss_fn)(p0, batches[i]["obs"], batches[i]["prev_action"],
+                          batches[i]["reward"], batches[i]["cont"], gnoise[i])
+        norm = torch.sqrt(sum((gg ** 2).sum() for gg in g.values()))
+        coef = min(1.0, clip / (float(norm) + 1e-6))
+        exp = {}
+        for n in p0:
+            gc = g[n] * coef
+            mm = (1 - b1) * gc
+            vv = (1 - b2) * gc * gc
+            mhat = mm / (1 - b1)
+            vhat = vv / (1 - b2)
+            exp[n] = p0[n] - lr * mhat / (torch.sqrt(vhat) + eps)
+        expected.append(exp)
+
+    trainer = BatchedWMTrainer(cfg, "cpu")
+    trainer.update(minds, batches, gnoise=gnoise)
+    for i, m in enumerate(minds):
+        got = dict(_WMLoss(m, cfg).named_parameters())
+        for n, exp in expected[i].items():
+            assert torch.allclose(got[n], exp, atol=1e-5), n
+
+
+def test_run_colony_batched_train_runs():
+    from embodied_agent.colony.run import run_colony
+    cfg = _tiny(load_config("colony"))
+    cfg.colony.batched = True
+    cfg.colony.batched_train = True
+    cfg.colony.n_init = 5
+    cfg.colony.n_max = 8
+    cfg.train.total_steps = 150
+    cfg.train.seq_len = 12
+    cfg.train.batch_size = 8
+    cfg.train.log_every = 75
+    out = run_colony(cfg, verbose=False)
+    assert out["stats"]["population"] >= cfg.colony.n_min
+
+
 def test_run_colony_batched_runs():
     from embodied_agent.colony.run import run_colony
     cfg = _tiny(load_config("colony"))

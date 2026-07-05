@@ -295,6 +295,9 @@ class ColonyConfig:
     train_every: int = 1          # only train minds every N colony steps (>1 = faster)
     batched: bool = False         # run all individual minds' acting as ONE vmapped
     #                               GPU op (same separate brains, computed in parallel)
+    batched_train: bool = False   # also train every mind's WORLD MODEL as ONE
+    #                               vmapped+grad GPU pass (Stage 2 of batching);
+    #                               actor-critic still on the rotating budget
     creature_radius: float = 0.4
     creature_collision_damage: float = 0.03   # integrity lost bumping others
     # reproduction: sustained energy surplus -> a live, mutated offspring

@@ -36,13 +36,14 @@ colony:
   n_max: 36
   n_min: 6
   shared_brain: false         # each creature is its own individual mind
-  batched: true               # run all those individual brains in parallel (GPU)
+  batched: true               # run all those individual brains' ACTING in parallel
+  batched_train: true         # ...and train every mind's WORLD MODEL in parallel too
   brain_inherit: true
-  # heavy per-brain training is the bottleneck, so train a few minds every few
-  # steps (each creature still learns; the sim runs much faster). Acting (one
-  # forward per creature) still happens every step.
-  max_trains_per_step: 3
-  train_every: 3
+  # with batched training the world-model update is ONE vmapped+grad GPU pass for
+  # the whole population, so every creature's world model can learn every step.
+  # The lighter actor-critic update still rotates over a small budget per step.
+  max_trains_per_step: 4
+  train_every: 1
   repro_energy_threshold: 0.70
   repro_rate: 0.005
   repro_cost: 0.30

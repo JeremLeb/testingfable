@@ -39,11 +39,14 @@ colony:
   batched: true               # run all those individual brains' ACTING in parallel
   batched_train: true         # ...and train every mind's WORLD MODEL in parallel too
   brain_inherit: true
-  # with batched training the world-model update is ONE vmapped+grad GPU pass for
-  # the whole population, so every creature's world model can learn every step.
-  # The lighter actor-critic update still rotates over a small budget per step.
-  max_trains_per_step: 4
-  train_every: 1
+  # batched training makes the world-model update ONE vmapped+grad GPU pass, so a
+  # whole rotating window of minds learns together (max_wm_batch per pass) at
+  # roughly the cost of a single old per-brain train -- keep the normal cadence
+  # so we don't pile 3x more work onto every step. The lighter actor-critic
+  # update rotates over a small budget.
+  max_trains_per_step: 3
+  train_every: 3
+  max_wm_batch: 16            # minds trained per batched world-model pass
   repro_energy_threshold: 0.70
   repro_rate: 0.005
   repro_cost: 0.30

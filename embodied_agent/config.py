@@ -298,6 +298,8 @@ class ColonyConfig:
     batched_train: bool = False   # also train every mind's WORLD MODEL as ONE
     #                               vmapped+grad GPU pass (Stage 2 of batching);
     #                               actor-critic still on the rotating budget
+    max_wm_batch: int = 0         # cap minds per batched WM pass (0 = all living);
+    #                               bounds per-step cost as the population grows
     creature_radius: float = 0.4
     creature_collision_damage: float = 0.03   # integrity lost bumping others
     # reproduction: sustained energy surplus -> a live, mutated offspring

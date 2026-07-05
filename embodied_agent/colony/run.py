@@ -125,7 +125,8 @@ def run_colony(cfg, verbose: bool = True, on_step=None, should_stop=None,
     gui_every = cfg.train.gui_every or 8
     live = {"metrics": {}}
     t0 = time.time()
-    ptr = 0  # round-robin training pointer over living creatures
+    ptr = 0       # round-robin pointer for actor-critic updates
+    wm_ptr = 0    # round-robin pointer for the batched world-model passes
     n_params = sum(p.numel() for p in env.living[0].mind.wm.parameters())
     log(f"colony | device={device} | {'shared' if shared else 'individual'} "
         f"minds | brain {n_params/1e3:.0f}k params each | start pop "
@@ -191,15 +192,23 @@ def run_colony(cfg, verbose: bool = True, on_step=None, should_stop=None,
         seq, bs = cfg.train.seq_len, cfg.train.batch_size
 
         if do_train and wm_trainer is not None:
-            # (1) batched WORLD-MODEL update: every sample-ready mind at once.
+            # (1) batched WORLD-MODEL update: many minds in one GPU pass. Capped
+            # per pass and rotated, so the per-step cost stays bounded as the
+            # population grows (CPU replay sampling + param stacking scale with N).
+            cap = cfg.colony.max_wm_batch or len(living)
+            start = wm_ptr % max(len(living), 1)
+            ordered = living[start:] + living[:start]
             ready, batches, seen_mid = [], [], set()
-            for c in living:
+            for c in ordered:
+                if len(ready) >= cap:
+                    break
                 mid = id(c.mind)
                 if mid in seen_mid or not c.mind.buffer.can_sample(seq):
                     continue
                 seen_mid.add(mid)
                 ready.append(c.mind)
                 batches.append(c.mind.buffer.sample(bs, seq, rng))
+            wm_ptr += max(len(ready), 1)
             if ready:
                 live["metrics"] = wm_trainer.update(ready, batches)
             # (2) actor-critic + intrinsic: rotating budget, per mind (lighter).
@@ -213,8 +222,10 @@ def run_colony(cfg, verbose: bool = True, on_step=None, should_stop=None,
                     continue
                 unique.add(mid)
                 batch = c.mind.buffer.sample(bs, seq, rng)
-                with torch.no_grad():                    # post = imagination starts
-                    _, post, _ = c.mind.wm.loss(batch)
+                with torch.no_grad():   # posterior = imagination starts (encoder +
+                    wm = c.mind.wm      # RSSM only; skip the decoder/heads we'd drop)
+                    post, _ = wm.rssm.observe(wm.encoder(batch["obs"]),
+                                              batch["prev_action"])
                 ac_m = c.mind.ac.train_step(post)
                 if c.mind.intrinsic is not None:
                     c.mind.intrinsic.train_step(

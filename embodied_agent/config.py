@@ -293,6 +293,8 @@ class ColonyConfig:
     brain_inherit: bool = True    # newborns inherit a copy of the parent's brain
     max_trains_per_step: int = 6  # cap minds trained per step (keeps it real-time)
     train_every: int = 1          # only train minds every N colony steps (>1 = faster)
+    batched: bool = False         # run all individual minds' acting as ONE vmapped
+    #                               GPU op (same separate brains, computed in parallel)
     creature_radius: float = 0.4
     creature_collision_damage: float = 0.03   # integrity lost bumping others
     # reproduction: sustained energy surplus -> a live, mutated offspring

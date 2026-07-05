@@ -126,6 +126,58 @@ def test_lineage_gene_means_and_tree():
     assert png_arr.ndim == 3 and png_arr.shape[2] == 3
 
 
+def test_batched_acting_matches_individual_brains():
+    # the vectorized engine must be numerically identical to running each
+    # creature's own brain in a loop (same separate brains, computed in parallel)
+    import torch
+    from torch.func import stack_module_state, functional_call, vmap
+    from embodied_agent.colony.run import Mind
+    from embodied_agent.colony.batched import _ObsFeat
+    from embodied_agent.model.rssm import RSSMState
+    cfg = _tiny(load_config("colony"))
+    sp = _spaces(cfg)
+    N = 3
+    minds = [Mind(cfg, sp, "cpu") for _ in range(N)]
+    for m in minds:
+        m.wm.eval()
+    d = lambda v: v if isinstance(v, int) else int(np.prod(v.shape))
+    obs = [{k: torch.randn(d(v)) for k, v in sp.items()} for _ in range(N)]
+    deter = cfg.model.deter_dim
+    stoch = minds[0].wm.rssm.stoch_flat
+    h = torch.randn(N, deter); z = torch.randn(N, stoch); pa = torch.randn(N, 2)
+    of = [_ObsFeat(m) for m in minds]
+    with torch.no_grad():
+        # (a) matches the real RSSM obs_step (deterministic h + posterior logits)
+        r = minds[0].wm.rssm
+        embed = minds[0].wm.encoder({k: v[None] for k, v in obs[0].items()})
+        post, _ = r.obs_step(RSSMState(h[0:1], z[0:1]), pa[0:1], embed)
+        hh, lg = of[0](obs[0], h[0], z[0], pa[0])
+        assert torch.allclose(post.h.squeeze(0), hh, atol=1e-4)
+        assert torch.allclose(post.params["logits"].squeeze(0), lg, atol=1e-4)
+        # (b) vmap over N stacked brains == the per-brain loop
+        hl = torch.stack([of[i](obs[i], h[i], z[i], pa[i])[0] for i in range(N)])
+        p, b = stack_module_state(of)
+        base = of[0]
+        ob = {k: torch.stack([obs[i][k] for i in range(N)]) for k in sp}
+        hv, _ = vmap(lambda p, b, o, x, y, w:
+                     functional_call(base, (p, b), (o, x, y, w)))(p, b, ob, h, z, pa)
+        assert torch.allclose(hv, hl, atol=1e-4)
+
+
+def test_run_colony_batched_runs():
+    from embodied_agent.colony.run import run_colony
+    cfg = _tiny(load_config("colony"))
+    cfg.colony.batched = True
+    cfg.colony.n_init = 5
+    cfg.colony.n_max = 8
+    cfg.train.total_steps = 120
+    cfg.train.seq_len = 12
+    cfg.train.batch_size = 8
+    cfg.train.log_every = 60
+    out = run_colony(cfg, verbose=False)
+    assert out["stats"]["population"] >= cfg.colony.n_min
+
+
 def test_run_colony_individual_and_shared():
     from embodied_agent.colony.run import run_colony
     for shared in (False, True):

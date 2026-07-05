@@ -77,7 +77,12 @@ its own brain, so two neighbours see and expect completely different things.
 Code lives in `embodied_agent/colony/` (`ColonyEnv`, `Creature`, `Mind`,
 `run_colony`) and reuses the single-agent senses, homeostasis, and world model
 unchanged — it's the same body and brain, just many independent copies in one
-shared world (a rotating per-step training budget keeps it real-time).
+shared world (a rotating per-step training budget keeps it real-time). On a GPU
+(`colony.batched`, on by default in `colony_gpu`) every creature's *separate*
+brain forward-pass is run as one **vectorized `torch.func`/vmap op** —
+numerically identical to the loop (the GRU is done with plain math so nothing
+falls back), just computed in parallel — which is what lets the colony scale to
+many creatures. Each creature still keeps its own weights, memory and instinct.
 
 **Full operating manual** — every command, flag, config key, output column,
 extension point, and troubleshooting table: [docs/MANUAL.md](docs/MANUAL.md).

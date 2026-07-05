@@ -21,6 +21,7 @@ from ..env.sensors import SensorSuite
 from ..intrinsic import build_intrinsic
 from ..model.world_model import WorldModel
 from ..utils.seeding import seed_everything
+from .batched import BatchedActing
 from .world import ColonyEnv
 
 
@@ -59,6 +60,12 @@ def run_colony(cfg, verbose: bool = True, on_step=None, should_stop=None) -> dic
     env = ColonyEnv(cfg, seed=seed)
     seg = max(2 * cfg.train.seq_len, 96)
     rng = np.random.default_rng(seed)
+    # batched acting: run every individual mind's forward pass as one vmapped
+    # GPU op (same separate brains, computed in parallel). Individual minds only.
+    batched = cfg.colony.batched and not shared
+    batcher = BatchedActing(cfg, device) if batched else None
+    deter = cfg.model.deter_dim
+    obs_keys = sorted(spaces)
 
     def attach(c):
         if shared:
@@ -68,9 +75,15 @@ def run_colony(cfg, verbose: bool = True, on_step=None, should_stop=None) -> dic
             if cfg.colony.brain_inherit and c.parent is not None \
                     and c.parent.mind is not None:
                 c.mind.inherit_from(c.parent.mind)
-        c.agent = DreamerAgent(c.mind.wm, c.mind.ac, device=device)
         c.episode = Episode()
         c.episode.add(c.obs, np.zeros(2), 0.0, 1.0)
+        if batched:                      # each creature keeps its own state
+            stoch = c.mind.wm.rssm.stoch_flat
+            c.h = torch.zeros(deter, device=device)
+            c.z = torch.zeros(stoch, device=device)
+            c.prev_a = torch.zeros(2, device=device)
+        else:
+            c.agent = DreamerAgent(c.mind.wm, c.mind.ac, device=device)
 
     for c in env.reset():
         attach(c)
@@ -89,9 +102,27 @@ def run_colony(cfg, verbose: bool = True, on_step=None, should_stop=None) -> dic
             log("stop requested"); break
 
         acting = env.living
-        actions = {c.id: c.agent.act(c.obs, bias=c.action_bias,
-                                     noise=cfg.agent.expl_noise)
-                   for c in acting}
+        if batched and acting:
+            # one vmapped forward for the whole population (each its own brain)
+            obs_stack = {k: torch.as_tensor(
+                np.stack([c.obs[k] for c in acting]), device=device).float()
+                for k in obs_keys}
+            h = torch.stack([c.h for c in acting])
+            z = torch.stack([c.z for c in acting])
+            pa = torch.stack([c.prev_a for c in acting])
+            bias = torch.as_tensor(
+                np.stack([c.action_bias for c in acting]), device=device).float()
+            act, h_new, z_new = batcher.act(
+                [c.mind for c in acting], obs_stack, h, z, pa, bias,
+                cfg.agent.expl_noise)
+            act_np = act.cpu().numpy()          # one GPU->CPU sync for all N
+            actions = {c.id: act_np[i] for i, c in enumerate(acting)}
+            for i, c in enumerate(acting):
+                c.h, c.z, c.prev_a = h_new[i], z_new[i], act[i]
+        else:
+            actions = {c.id: c.agent.act(c.obs, bias=c.action_bias,
+                                         noise=cfg.agent.expl_noise)
+                       for c in acting}
         results, births, deaths = env.step(actions)
 
         for c in acting:
@@ -108,6 +139,8 @@ def run_colony(cfg, verbose: bool = True, on_step=None, should_stop=None) -> dic
             # a shared brain keeps the memory; a private mind dies with the body
             if shared and d.episode is not None:
                 shared_mind.buffer.ingest(d.episode)
+            if batcher is not None and d.mind is not None:
+                batcher.forget(d.mind)
             d.agent = d.episode = d.mind = None
         for b in births:
             attach(b)

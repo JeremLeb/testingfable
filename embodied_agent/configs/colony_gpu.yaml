@@ -36,6 +36,7 @@ colony:
   n_max: 36
   n_min: 6
   shared_brain: false         # each creature is its own individual mind
+  batched: true               # run all those individual brains in parallel (GPU)
   brain_inherit: true
   # heavy per-brain training is the bottleneck, so train a few minds every few
   # steps (each creature still learns; the sim runs much faster). Acting (one

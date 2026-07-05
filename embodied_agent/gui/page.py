@@ -40,6 +40,7 @@ PAGE = r"""<!doctype html>
     font-weight:600;font-size:14px}
   .go.start{background:var(--accent);color:#fff}
   .go.stop{background:#3a2530;color:var(--red);border:1px solid #5a2e37}
+  .go.save{background:var(--panel2);color:var(--ink);border:1px solid var(--line)}
   .go:disabled{opacity:.45;cursor:not-allowed}
   .grid{display:grid;grid-template-columns:1.25fr 1fr;gap:16px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
@@ -84,6 +85,9 @@ PAGE = r"""<!doctype html>
     <div class="row">
       <button class="go start" id="start">▶ Start</button>
       <button class="go stop" id="stop" disabled>■ Stop</button>
+      <button class="go save" id="save" disabled title="Save the colony now">💾 Save</button>
+      <label id="resumeWrap" class="sub" style="display:none;gap:6px;align-items:center;cursor:pointer">
+        <input type="checkbox" id="resume"> Resume last saved colony</label>
       <span id="msg" class="sub" style="margin-left:8px"></span>
     </div>
   </div>
@@ -232,6 +236,12 @@ async function poll(){
     $('food').textContent=st.food_total??0; $('er').textContent=(st.eval_reward??'—');
   }
   $('start').disabled=s.running; $('stop').disabled=!s.running;
+  // persistence controls (colony only): Save while running, Resume before start
+  const colonyPicked=(SEL==='colony');
+  $('save').disabled=!(s.running && colony);
+  $('resumeWrap').style.display=colonyPicked?'flex':'none';
+  const rz=$('resume'); rz.disabled=s.running||!s.has_save;
+  if(!s.has_save)rz.checked=false;
   const h=s.history||{};
   drawChart($('c_reward'),h.reward,colony?'#39d98a':'#4c8dff');
   drawChart($('c_wm'),h.wm_loss,'#ffab4c');
@@ -299,10 +309,12 @@ $('start').onclick=async()=>{
   const switches={};
   ['neuromod','sleep','dev','metab'].forEach(k=>{const el=$('sw_'+k);
     if(el)switches[k]=el.checked;});
+  const resume=$('resume').checked;
   await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({scenario:SEL,switches})});
+    body:JSON.stringify({scenario:SEL,switches,resume})});
 };
 $('stop').onclick=()=>fetch('/api/stop',{method:'POST'});
+$('save').onclick=()=>fetch('/api/save',{method:'POST'});
 
 // click a creature in the world to inspect what it sees (colony)
 $('arena').onclick=(ev)=>{

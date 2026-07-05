@@ -321,6 +321,7 @@ class TrainConfig:
     eval_every: int = 5000
     gif_every: int = 10000
     gui_every: int = 0            # steps between live-GUI callbacks (0 = off)
+    save_every: int = 0           # colony steps between auto-saves (0 = off)
     seed: int = 0
     device: str = "cuda"          # "cuda" auto-falls back to CPU if unavailable
     out_dir: str = "runs/default"

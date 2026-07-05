@@ -71,6 +71,9 @@ class GuiState:
         self.focused_id = None          # creature the user clicked to inspect
         self._snap = None               # {S, pts:[(id,x,y)]} for click->creature
         self.device = "cpu"
+        self.save_path = "runs/gui/colony.pt"   # where a colony auto-saves
+        self.save_request = False               # one-shot "Save now" flag
+        self.resume_next = False                # resume the saved colony on Start
         self.status = {"phase": "idle", "step": 0, "message": "Press Start."}
         self.config = {}
         self.history = {k: [] for k in
@@ -83,11 +86,14 @@ class GuiState:
 
     # ------------------------------------------------------ training thread
 
-    def start(self, scenario: str, switches: dict, steps: int | None):
+    def start(self, scenario: str, switches: dict, steps: int | None,
+              resume: bool = False):
         with self.lock:
             if self.running:
                 return False
             self.stop_flag = False
+            self.save_request = False
+            self.resume_next = bool(resume)
             self.running = True
             self.renderer = None
             self.senses_renderer = None
@@ -135,8 +141,14 @@ class GuiState:
                                "total_steps": cfg.train.total_steps}
             if self.colony_mode:
                 from ..colony.run import run_colony
+                cfg.train.out_dir = "runs/gui"
+                cfg.train.save_every = cfg.train.save_every or 1500  # auto-save
+                resume = None
+                import os
+                if self.resume_next and os.path.exists(self.save_path):
+                    resume = self.save_path
                 run_colony(cfg, verbose=False, on_step=self._on_step_colony,
-                           should_stop=lambda: self.stop_flag)
+                           should_stop=lambda: self.stop_flag, resume=resume)
             else:
                 from ..train import run
                 run(cfg, verbose=False, on_step=self._on_step,
@@ -226,6 +238,14 @@ class GuiState:
         env = s["env"]
         st = s["stats"]
         m = s.get("metrics", {})
+        if self.save_request:                 # "Save now" -- on the train thread
+            self.save_request = False
+            try:
+                from ..colony.persistence import save_colony
+                save_colony(env, self.save_path)
+                self._set_phase("colony", "Saved the colony.")
+            except Exception as e:
+                self._set_phase("colony", f"Save failed: {e}")
         foc = self._resolve_focus(env)
         # the body bars show the INSPECTED individual's own stats (not the
         # colony average); fall back to colony means only if nobody is alive.
@@ -413,13 +433,15 @@ class GuiState:
     # ------------------------------------------------------ snapshots
 
     def state_json(self) -> bytes:
+        import os
+        has_save = os.path.exists(self.save_path)
         with self.lock:
             payload = {"running": self.running, "device": self.device,
                        "mode": "colony" if self.colony_mode else "single",
                        "status": dict(self.status), "config": dict(self.config),
                        "history": {k: list(v) for k, v in self.history.items()},
                        "scenarios": {k: v[1] for k, v in SCENARIOS.items()},
-                       "switches": SWITCHES}
+                       "switches": SWITCHES, "has_save": has_save}
         return json.dumps(payload).encode()
 
     def frame_bytes(self) -> bytes:
@@ -497,11 +519,15 @@ class Handler(BaseHTTPRequestHandler):
             req = {}
         if self.path == "/api/start":
             started = STATE.start(req.get("scenario", "bio_cpu"),
-                                  req.get("switches", {}), req.get("steps"))
+                                  req.get("switches", {}), req.get("steps"),
+                                  resume=bool(req.get("resume", False)))
             self._send(200, json.dumps({"started": started}).encode(),
                        "application/json")
         elif self.path == "/api/stop":
             STATE.stop()
+            self._send(200, b'{"ok":true}', "application/json")
+        elif self.path == "/api/save":
+            STATE.save_request = True          # honoured on the training thread
             self._send(200, b'{"ok":true}', "application/json")
         elif self.path == "/api/focus":
             try:

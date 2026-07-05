@@ -62,6 +62,13 @@ Your browser opens to a dashboard. If it doesn't, go to
    one does).
 3. Press **▶ Start**.
 
+**Saving a colony.** A colony auto-saves every so often, and you can hit
+**💾 Save** any time while it runs. To pick a long-evolved run back up later,
+tick **Resume last saved colony** before pressing **▶ Start** — every creature
+comes back with its own evolved brain, its lineage, and the generation count
+intact. (From the command line: `python -m embodied_agent.colony.run
+--config colony_gpu --resume runs/gui/colony.pt`.)
+
 You'll see:
 
 - **The world** — your creature is the **blue dot**. Green blobs are food. The

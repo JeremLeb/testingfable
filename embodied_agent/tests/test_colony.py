@@ -327,6 +327,65 @@ def test_run_colony_batched_runs():
     assert out["stats"]["population"] >= cfg.colony.n_min
 
 
+def test_colony_save_load_roundtrip(tmp_path):
+    # saving then loading must preserve body state, homeostasis, and the exact
+    # mind weights of every creature (progression is not lost)
+    import os, torch
+    from embodied_agent.colony.run import run_colony
+    from embodied_agent.colony.persistence import save_colony, load_colony
+    cfg = _tiny(load_config("colony"))
+    cfg.colony.batched = True
+    cfg.colony.batched_train = True
+    cfg.colony.n_init = 5
+    cfg.colony.n_max = 7
+    cfg.train.total_steps = 130
+    cfg.train.seq_len = 12
+    cfg.train.batch_size = 8
+    cfg.train.log_every = 200
+    cfg.train.save_every = 130
+    cfg.train.out_dir = str(tmp_path / "col")
+    out = run_colony(cfg, verbose=False)
+    path = out["save_path"]
+    assert os.path.exists(path)
+
+    env, _ = load_colony(path, device="cpu")
+    assert env.steps == 130 and len(env.living) >= cfg.colony.n_min
+    c0 = env.living[0]
+    assert c0.mind is not None and getattr(c0, "h", None) is not None
+
+    # tamper a body value + a weight, save, reload -> both survive exactly
+    c0.homeostasis.energy = 0.1234
+    with torch.no_grad():
+        next(c0.mind.wm.parameters()).add_(1.0)
+    target = next(c0.mind.wm.parameters()).detach().clone()
+    genes0 = dict(c0.genome.genes)
+    save_colony(env, tmp_path / "col2.pt")
+    env2, _ = load_colony(tmp_path / "col2.pt", device="cpu")
+    d0 = env2.living[0]
+    assert abs(d0.homeostasis.energy - 0.1234) < 1e-6
+    assert d0.genome.genes == genes0
+    assert torch.allclose(next(d0.mind.wm.parameters()), target)
+
+
+def test_colony_resume_continues(tmp_path):
+    from embodied_agent.colony.run import run_colony
+    cfg = _tiny(load_config("colony"))
+    cfg.colony.batched = True
+    cfg.colony.n_init = 5
+    cfg.colony.n_max = 7
+    cfg.train.total_steps = 130
+    cfg.train.seq_len = 12
+    cfg.train.batch_size = 8
+    cfg.train.log_every = 200
+    cfg.train.save_every = 130
+    cfg.train.out_dir = str(tmp_path / "col")
+    out = run_colony(cfg, verbose=False)
+    # resuming runs from the saved step (only 20 more) and keeps the colony alive
+    cfg.train.total_steps = 150
+    out2 = run_colony(cfg, verbose=False, resume=out["save_path"])
+    assert out2["stats"]["population"] >= cfg.colony.n_min
+
+
 def test_run_colony_individual_and_shared():
     from embodied_agent.colony.run import run_colony
     for shared in (False, True):

@@ -47,7 +47,8 @@ class Mind:
         self.ac.target_critic.load_state_dict(other.ac.target_critic.state_dict())
 
 
-def run_colony(cfg, verbose: bool = True, on_step=None, should_stop=None) -> dict:
+def run_colony(cfg, verbose: bool = True, on_step=None, should_stop=None,
+               resume=None) -> dict:
     seed = cfg.train.seed
     seed_everything(seed)
     device = "cuda" if (cfg.train.device == "cuda"
@@ -57,8 +58,6 @@ def run_colony(cfg, verbose: bool = True, on_step=None, should_stop=None) -> dic
 
     spaces = SensorSuite(cfg.sensor, cfg.env,
                          np.random.default_rng(seed)).spaces
-    shared_mind = Mind(cfg, spaces, device) if shared else None
-    env = ColonyEnv(cfg, seed=seed)
     seg = max(2 * cfg.train.seq_len, 96)
     rng = np.random.default_rng(seed)
     # batched acting: run every individual mind's forward pass as one vmapped
@@ -72,26 +71,56 @@ def run_colony(cfg, verbose: bool = True, on_step=None, should_stop=None) -> dic
     deter = cfg.model.deter_dim
     obs_keys = sorted(spaces)
 
-    def attach(c):
-        if shared:
-            c.mind = shared_mind
-        else:
-            c.mind = Mind(cfg, spaces, device)
-            if cfg.colony.brain_inherit and c.parent is not None \
-                    and c.parent.mind is not None:
-                c.mind.inherit_from(c.parent.mind)
+    def attach(c, new_mind=True):
+        if new_mind:
+            if shared:
+                c.mind = shared_mind
+            else:
+                c.mind = Mind(cfg, spaces, device)
+                if cfg.colony.brain_inherit and c.parent is not None \
+                        and c.parent.mind is not None:
+                    c.mind.inherit_from(c.parent.mind)
         c.episode = Episode()
         c.episode.add(c.obs, np.zeros(2), 0.0, 1.0)
         if batched:                      # each creature keeps its own state
-            stoch = c.mind.wm.rssm.stoch_flat
-            c.h = torch.zeros(deter, device=device)
-            c.z = torch.zeros(stoch, device=device)
-            c.prev_a = torch.zeros(2, device=device)
+            if getattr(c, "h", None) is None:   # keep any restored state
+                stoch = c.mind.wm.rssm.stoch_flat
+                c.h = torch.zeros(deter, device=device)
+                c.z = torch.zeros(stoch, device=device)
+                c.prev_a = torch.zeros(2, device=device)
         else:
             c.agent = DreamerAgent(c.mind.wm, c.mind.ac, device=device)
 
-    for c in env.reset():
-        attach(c)
+    # resume an evolved colony from a snapshot, or start a fresh one
+    if resume is not None:
+        from .persistence import load_colony
+        env, device = load_colony(resume, device=device)
+        shared_mind = env.living[0].mind if (shared and env.living) else None
+        for c in env.living:
+            attach(c, new_mind=False)
+        start_step = env.steps + 1
+        log(f"resumed colony from {resume} at step {env.steps} | pop "
+            f"{len(env.living)} | max gen {env.stats()['max_generation']}")
+    else:
+        shared_mind = Mind(cfg, spaces, device) if shared else None
+        env = ColonyEnv(cfg, seed=seed)
+        for c in env.reset():
+            attach(c)
+        start_step = 1
+
+    # where to auto-save (so a long evolved run survives a Stop / crash)
+    import pathlib
+    save_path = pathlib.Path(cfg.train.out_dir) / "colony.pt"
+    save_every = max(int(cfg.train.save_every), 0)
+
+    def save(reason=""):
+        try:
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            from .persistence import save_colony
+            save_colony(env, save_path)
+            log(f"saved colony -> {save_path}{reason}")
+        except Exception as e:                       # never crash a run on save
+            log(f"warning: colony save failed: {e}")
 
     gui_every = cfg.train.gui_every or 8
     live = {"metrics": {}}
@@ -102,9 +131,12 @@ def run_colony(cfg, verbose: bool = True, on_step=None, should_stop=None) -> dic
         f"minds | brain {n_params/1e3:.0f}k params each | start pop "
         f"{len(env.living)}")
 
-    for step in range(1, cfg.train.total_steps + 1):
+    for step in range(start_step, cfg.train.total_steps + 1):
         if should_stop is not None and should_stop():
-            log("stop requested"); break
+            log("stop requested")
+            if save_every:
+                save(" (on stop)")
+            break
 
         acting = env.living
         if batched and acting:
@@ -223,10 +255,15 @@ def run_colony(cfg, verbose: bool = True, on_step=None, should_stop=None) -> dic
             on_step({"step": step, "env": env, "stats": env.stats(),
                      "metrics": live["metrics"], "sps": step / (time.time() - t0)})
 
+        if save_every and step % save_every == 0:
+            save()
+
     stats = env.stats()
+    if save_every:
+        save(" (final)")
     log(f"\nFINAL | pop {stats['population']} | total births {stats['births']} "
         f"| deaths {stats['deaths']} | max generation {stats['max_generation']}")
-    return {"stats": stats, "shared_brain": shared}
+    return {"stats": stats, "shared_brain": shared, "save_path": str(save_path)}
 
 
 def main():
@@ -237,6 +274,10 @@ def main():
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--shared-brain", action="store_true",
                     help="one pooled brain instead of individual minds")
+    ap.add_argument("--resume", default=None,
+                    help="resume an evolved colony from a saved snapshot (.pt)")
+    ap.add_argument("--save-every", type=int, default=None,
+                    help="auto-save the colony every N steps (0 = off)")
     args = ap.parse_args()
     cfg = load_config(args.config)
     if args.steps:
@@ -245,7 +286,11 @@ def main():
         cfg.train.seed = args.seed
     if args.shared_brain:
         cfg.colony.shared_brain = True
-    return run_colony(cfg)
+    if args.save_every is not None:
+        cfg.train.save_every = args.save_every
+    elif cfg.train.save_every == 0:
+        cfg.train.save_every = 2000        # sensible default from the CLI
+    return run_colony(cfg, resume=args.resume)
 
 
 if __name__ == "__main__":

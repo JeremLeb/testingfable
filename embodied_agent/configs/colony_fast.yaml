@@ -1,0 +1,60 @@
+# A FASTER living colony for a GPU (e.g. laptop RTX 4060 Ti). Same design as
+# colony_gpu -- every creature has its OWN individual mind, batched acting AND
+# batched world-model training, reproduction and in-place evolution -- but tuned
+# for frame-rate over depth: smaller per-brain models, fewer minds trained per
+# batched pass, and shorter training sequences. Expect noticeably more steps/s
+# (creatures a little less deep). `device: cuda` auto-falls back to CPU. The
+# GUI's "Colony (fast)" scenario picks this automatically.
+#
+#   python -m embodied_agent.colony.run --config colony_fast
+env:
+  arena_size: 40.0
+  n_food: 40
+  food_energy: 0.4
+  food_respawn_steps: 200
+  n_obstacles: 5
+  n_hot: 3
+  n_cold: 3
+  base_metabolism: 0.0010
+sensor:
+  vision_mode: rays
+  n_rays: 16
+model:
+  embed_dim: 64
+  deter_dim: 128             # ~4x fewer params in the big layers than colony_gpu
+  hidden: 128
+  latent_kind: discrete
+  latent_groups: 12
+  latent_classes: 12
+  reward_head: twohot
+  reward_bins: 41
+agent:
+  horizon: 10
+  expl_noise: 0.3
+intrinsic:
+  method: rnd
+colony:
+  n_init: 16
+  n_max: 36
+  n_min: 6
+  shared_brain: false
+  batched: true
+  batched_train: true
+  brain_inherit: true
+  max_trains_per_step: 2
+  train_every: 3
+  max_wm_batch: 10           # fewer minds per batched pass -> cheaper each step
+  repro_energy_threshold: 0.70
+  repro_rate: 0.005
+  repro_cost: 0.30
+  mutation_rate: 0.12
+  creature_collision_damage: 0.03
+train:
+  total_steps: 1000000
+  seq_len: 16                # shorter BPTT sequence than colony_gpu (24)
+  batch_size: 16
+  log_every: 500
+  gui_every: 6
+  buffer_capacity: 20000
+  device: cuda
+  out_dir: runs/colony_fast

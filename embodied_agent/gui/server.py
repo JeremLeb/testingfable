@@ -31,7 +31,15 @@ SCENARIOS = {
                "body, senses and mind (its own brain + memory). They share a "
                "world, forage, collide, breed (offspring inherit a parent's "
                "brain), and evolve. (Biological switches don't apply here.)"),
+    "colony_fast": ("colony_fast",
+                    "The same living colony, tuned for SPEED: smaller per-brain "
+                    "models and lighter training, so it runs noticeably faster "
+                    "(creatures a little less deep). Best if the colony feels "
+                    "slow."),
 }
+
+# colony scenarios (all share the multi-creature plumbing)
+COLONY_SCENARIOS = ("colony", "colony_fast")
 
 # Biological switches the UI can toggle on top of a scenario.
 SWITCHES = {
@@ -123,7 +131,7 @@ class GuiState:
                 preset = "colony_gpu"
             cfg = load_config(preset)
             self.sensor_cfg = cfg.sensor
-            self.colony_mode = (scenario == "colony")
+            self.colony_mode = (scenario in COLONY_SCENARIOS)
             if not self.colony_mode:
                 for key, on in switches.items():   # per-switch overrides
                     if key in ("neuromod", "sleep", "dev", "metab"):
@@ -141,7 +149,10 @@ class GuiState:
                                "total_steps": cfg.train.total_steps}
             if self.colony_mode:
                 from ..colony.run import run_colony
-                cfg.train.out_dir = "runs/gui"
+                # per-preset save file so a fast colony (small brains) never
+                # collides with the smart colony (big brains) on resume.
+                cfg.train.out_dir = f"runs/gui/{preset}"
+                self.save_path = f"{cfg.train.out_dir}/colony.pt"
                 cfg.train.save_every = cfg.train.save_every or 1500  # auto-save
                 resume = None
                 import os
@@ -434,14 +445,22 @@ class GuiState:
 
     def state_json(self) -> bytes:
         import os
-        has_save = os.path.exists(self.save_path)
+
+        def _save_of(scn):                 # resolved snapshot path per scenario
+            preset = scn
+            if scn == "colony" and self.device == "cuda":
+                preset = "colony_gpu"
+            return os.path.exists(f"runs/gui/{preset}/colony.pt")
+
+        saves = {s: _save_of(s) for s in COLONY_SCENARIOS}
         with self.lock:
             payload = {"running": self.running, "device": self.device,
                        "mode": "colony" if self.colony_mode else "single",
                        "status": dict(self.status), "config": dict(self.config),
                        "history": {k: list(v) for k, v in self.history.items()},
                        "scenarios": {k: v[1] for k, v in SCENARIOS.items()},
-                       "switches": SWITCHES, "has_save": has_save}
+                       "switches": SWITCHES, "saves": saves,
+                       "has_save": any(saves.values())}
         return json.dumps(payload).encode()
 
     def frame_bytes(self) -> bytes:

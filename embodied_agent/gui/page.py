@@ -237,11 +237,12 @@ async function poll(){
   }
   $('start').disabled=s.running; $('stop').disabled=!s.running;
   // persistence controls (colony only): Save while running, Resume before start
-  const colonyPicked=(SEL==='colony');
+  const colonyPicked=(SEL==='colony'||SEL==='colony_fast');
+  const canResume=!!(s.saves&&s.saves[SEL]);
   $('save').disabled=!(s.running && colony);
   $('resumeWrap').style.display=colonyPicked?'flex':'none';
-  const rz=$('resume'); rz.disabled=s.running||!s.has_save;
-  if(!s.has_save)rz.checked=false;
+  const rz=$('resume'); rz.disabled=s.running||!canResume;
+  if(!canResume)rz.checked=false;
   const h=s.history||{};
   drawChart($('c_reward'),h.reward,colony?'#39d98a':'#4c8dff');
   drawChart($('c_wm'),h.wm_loss,'#ffab4c');
@@ -286,8 +287,9 @@ async function poll(){
 
 function buildControls(s){
   const scn=$('scn'); scn.innerHTML='';
-  const order=['colony','bio_gpu','bio_cpu','baseline'];
-  const name={colony:'🐜 Colony · community',bio_gpu:'GPU · biological',
+  const order=['colony','colony_fast','bio_gpu','bio_cpu','baseline'];
+  const name={colony:'🐜 Colony · community',colony_fast:'⚡ Colony · fast',
+    bio_gpu:'GPU · biological',
     bio_cpu:'CPU · biological',baseline:'CPU · baseline'};
   order.forEach(k=>{ if(!(k in s.scenarios))return;
     const b=document.createElement('button'); b.dataset.k=k;
